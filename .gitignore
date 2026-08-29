@@ -1,0 +1,9 @@
+node_modules/
+dist/
+data/
+.env
+# '.env copy.example' 같은 변종까지 잡는다. .env.example 만 예외로 추적한다.
+.env*
+!.env.example
+*.log
+.DS_Store

@@ -1,0 +1,16 @@
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  /* 로그를 오래 보는 도구다. 기본은 다크. */
+  background: var(--mantine-color-body);
+}
+
+/* 정보 밀도를 위해 기본 폰트 크기를 한 단계 줄인다. */
+:root {
+  --mantine-font-size-md: 0.875rem;
+}

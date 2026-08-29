@@ -1,0 +1,523 @@
+/**
+ * 화면 문자열. `ko` 가 원본이고 `en` 은 같은 키를 전부 채워야 한다 —
+ * Record<StringKey, string> 이라 빠뜨리면 타입 검사에서 걸린다.
+ *
+ * 자리표시자는 `{이름}` 이다. 개수에 따라 말이 갈리는 영어는 `단수|복수` 로
+ * 쓰고 `n` 을 넘긴다. 한국어는 수를 구분하지 않으므로 한쪽만 쓴다.
+ */
+export const ko = {
+  /* ── 공통 ─────────────────────────────────────────────── */
+  'common.cancel': '취소',
+  'common.save': '저장',
+  'common.copy': '복사',
+  'common.copied': '복사됨',
+  'common.none': '없음',
+  'common.all': '전체',
+  'common.on': '켜짐',
+  'common.off': '꺼짐',
+  'common.prev': '이전',
+  'common.next': '다음',
+  'common.run': '조회',
+  'common.from': '시작',
+  'common.to': '끝',
+  'common.email': '이메일',
+  'common.password': '비밀번호',
+  'common.levelCount': '{n}종',
+  'common.count': '{n}건',
+
+  /* ── 머리줄 ───────────────────────────────────────────── */
+  'nav.users': '계정 관리',
+  'nav.audit': '감사 로그',
+  'nav.changePassword': '비밀번호 변경',
+  'nav.logout': '로그아웃',
+  'nav.language': '언어',
+
+  /* ── 로그인 ───────────────────────────────────────────── */
+  'login.subtitle': '계정은 관리자가 발급한다.',
+  'login.submit': '로그인',
+  'login.failed': '로그인에 실패했다',
+
+  /* ── 비밀번호 변경 ────────────────────────────────────── */
+  'password.title': '비밀번호 변경',
+  'password.forced': '최초 로그인이다. 비밀번호를 바꿔야 나머지 기능을 쓸 수 있다.',
+  'password.current': '현재 비밀번호',
+  'password.new': '새 비밀번호',
+  'password.minLength': '{n}자 이상',
+  'password.confirm': '새 비밀번호 확인',
+  'password.mismatch': '새 비밀번호가 서로 다르다',
+  'password.failed': '변경에 실패했다',
+
+  /* ── 환경 선택 ────────────────────────────────────────── */
+  'env.noOrgs': '이 계정에 연결된 조직이 없다. 관리자에게 조직 접근 권한을 요청한다.',
+  'env.refresh': 'Cloud Manager 에서 새로고침',
+  'env.loadFailed': '환경 목록을 가져오지 못했다',
+  'env.forbidden': '.env 에는 있지만 이 계정에 권한이 없는 조직: {orgs}',
+  'env.forbiddenHelp': '조직 접근은 관리자가 명시적으로 준다. .env 에 추가해도 자동으로 붙지 않는다.',
+  'env.forbiddenAdmin': '계정 관리에서 직접 체크한다.',
+  'env.forbiddenMember': '관리자에게 요청한다.',
+  'env.goToUsers': '계정 관리로 가기',
+  'env.stale': '권한은 있는데 .env 에 없는 조직: {orgs}',
+  'env.staleHelp': '.env 에서 지워졌거나 ORG_n_KEY 가 바뀌었다. 화면에서는 걸러진다.',
+  'env.loading': '환경 목록을 가져오는 중',
+  'env.empty': '이 조직에 보이는 환경이 없다. 위의 새로고침을 눌러 Cloud Manager 에서 다시 받아온다.',
+  'env.colEnv': '환경',
+  'env.colType': '타입',
+  'env.colProgram': '프로그램',
+  'env.colServices': '서비스',
+  'env.checkServices': '서비스 확인',
+  'env.noOpenable': '열 수 있는 로그가 없다',
+  'env.tailTip': '{service} / {name} 실시간 tail',
+  'env.searchTip': '시간대 조회',
+  'env.searchAria': '{service} / {name} 시간대 조회',
+
+  /* ── 창 (tail·조회 공통) ──────────────────────────────── */
+  'pane.filterHere': '이 창에서 거르기',
+  'pane.findHere': '이 창에서 찾기',
+  'pane.regex': '정규식',
+  'pane.regexFilterAria': '정규식으로 거르기',
+  'pane.regexFindAria': '정규식으로 찾기',
+  'pane.quickPick': '빠른 선택',
+  'pane.pickLevels': '직접 고르기',
+  'pane.view': '보기',
+  'pane.viewAria': '보기 옵션',
+  'pane.viewAriaBookmarks': '보기 옵션 (북마크 {n}건)',
+  'pane.group': '같은 사건 묶기',
+  'pane.groupedLines': '−{n}줄',
+  'pane.onlyBookmarked': '북마크만 보기',
+  'pane.chart': '시간축 분포',
+  'pane.close': '이 창 닫기',
+  'pane.pause': '일시정지',
+  'pane.resume': '재개 {n}',
+  'pane.disconnected': '끊김',
+  'pane.opening': '로그 스트림을 여는 중',
+  'pane.noMatch': '검색어와 맞는 줄이 버퍼에 없다.',
+  'pane.noMatchHint': '검색어를 지우거나 레벨을 넓혀본다.',
+  'pane.noneYet': '아직 {levels} 가 들어오지 않았다.',
+  'pane.noneYetAny': '로그',
+  'pane.noneYetHint': '레벨을 넓히거나, 트래픽이 있는지 확인한다.',
+  'pane.dropped': '버퍼가 넘쳐 {n}줄이 밀려났다',
+  'pane.rollover': 'UTC 날짜가 바뀌어 {date} 파일로 넘어갔다',
+  'pane.exportSelection': '선택 구간 내보내기',
+
+  /* ── 시간대 조회 ──────────────────────────────────────── */
+  'search.capped': '결과 상한에 도달해 멈췄다. 구간을 좁힌다',
+  'search.skipped': '보존 기간이 지나 못 읽은 날짜: {dates}',
+  'search.missing': '로그가 없던 날짜: {dates}',
+  'search.idle': '위에서 구간을 고르고 조회를 누른다.',
+  'search.idleShared': '모든 창이 같은 구간으로 함께 조회된다.',
+  'search.running': '훑는 중 — 맞는 줄이 나오는 대로 채워진다.',
+  'search.empty': '이 구간에 조건과 맞는 줄이 없다.',
+  'search.emptyHint': '레벨을 넓히거나 구간을 바꿔본다.',
+  'search.startFailed': '조회를 시작하지 못했다',
+  'search.streamLost': '연결이 끊겼다',
+  'search.runPanes': '{n}개 창 조회',
+  'range.minutes': '{n}분',
+  'range.hours': '{n}시간',
+  'range.invalid': '끝 시각이 시작 시각보다 앞이다.',
+  'range.lagHint':
+    '로그가 스토리지에 도착하기까지 {lag}분쯤 걸린다. {range}분 구간이면 마지막 {tail}분은 아직 비어 있을 수 있다.',
+
+  /* ── 창 나누기 ────────────────────────────────────────── */
+  'panes.count': '창 {n}/{max}',
+  'panes.add': '+ 창 추가',
+  'panes.maxTail': '창은 {max}개까지다 (브라우저 연결 수 제한)',
+  'panes.maxSearch': '창은 {max}개까지다',
+  'panes.addTipTail': '다른 환경·로그를 같이 본다',
+  'panes.addTipSearch': '다른 환경·로그를 같은 구간으로 비교한다',
+  'panes.noTarget': '볼 대상이 없다. 환경 선택 화면에서 로그를 골라 들어온다.',
+  'split.row': '좌우',
+  'split.column': '상하',
+  'split.autoTail': '화면 폭에 맞춰 자동으로 고르고 있다. 직접 고르면 그 선택을 기억한다.',
+  'split.manualTail': '직접 고른 값이다. 화면 폭과 무관하게 유지된다.',
+  'split.auto': '화면 폭에 맞춰 자동으로 고르고 있다',
+  'split.manual': '직접 고른 값이다',
+
+  /* ── 창 추가 ──────────────────────────────────────────── */
+  'picker.title': '창 추가',
+  'picker.already': '이미 열려 있다',
+  'picker.noLogs': '이 환경에서 열 수 있는 로그가 없다.',
+  'picker.otherEnv': '다른 환경의 로그는 환경 선택 화면에서 연다.',
+
+  /* ── 로그 한 줄 ───────────────────────────────────────── */
+  'line.bookmark': '북마크',
+  'line.bookmarkTip': '북마크 — 버퍼에서 밀려나도 남는다',
+  'line.unbookmark': '북마크 해제',
+  'line.grouped': '같은 사건 {n}건을 묶었다',
+  'line.masked': '민감정보가 가려졌다',
+  'line.stack': '스택트레이스 {n}줄',
+  'line.expandAria': '스택트레이스 {n}줄 펼치기',
+  'line.collapseAria': '스택트레이스 {n}줄 접기',
+
+  /* ── 뷰어 ─────────────────────────────────────────────── */
+  'viewer.newLines': '새 로그 {n}건 — 맨 아래로',
+  'viewer.toBottom': '맨 아래로',
+  'viewer.following': '따라가는 중',
+  'viewer.selectedGroups': '{groups}개 묶음 · {lines}줄',
+  'viewer.selectedLines': '{n}줄 선택됨',
+  'viewer.shiftHint': 'Shift 를 누른 채 끝 줄을 누르면 구간이 잡힌다',
+  'viewer.clearSelection': '선택 해제',
+
+  /* ── 내보내기 ─────────────────────────────────────────── */
+  'export.title': '선택 구간 내보내기',
+  'export.lines': '{n}줄을 파일로 저장한다. 마스킹은 이미 적용된 상태로 나간다.',
+  'export.format': '포맷',
+  'export.hintLog': '원본 라인 그대로',
+  'export.hintJson': 'JSONL — 줄마다 LogEntry 하나',
+  'export.hintCsv': 'ts, level, pod, thread, logger, message',
+  'export.stack': '스택트레이스 포함',
+  'export.headerNote':
+    '파일 첫머리에 조직·환경·구간·필터·요청자가 기록된다. 며칠 뒤에도 출처를 알 수 있다.',
+  'export.submit': '내보내기',
+  'export.failed': '내보내기에 실패했다',
+
+  /* ── 저장된 필터 ──────────────────────────────────────── */
+  'filters.label': '필터',
+  'filters.saved': '저장된 조건',
+  'filters.empty': '아직 없다',
+  'filters.saveCurrent': '지금 조건을 저장…',
+  'filters.title': '조회 조건 저장',
+  'filters.name': '이름',
+  'filters.namePlaceholder': '예: prod ERROR 최근 6시간',
+  'filters.noteSearch':
+    '레벨·검색어·구간 길이가 저장된다. 시작·끝 시각은 저장하지 않는다 — 다음에 열 때 그 길이로 다시 계산한다.',
+  'filters.noteTail': '레벨과 검색어가 저장된다.',
+  'filters.saveFailed': '저장에 실패했다',
+
+  /* ── 글자 크기 ────────────────────────────────────────── */
+  'font.label': '글자 크기',
+  'font.xs': '아주 작게',
+  'font.sm': '작게',
+  'font.md': '보통',
+  'font.lg': '크게',
+
+  /* ── 마지막 로그 시각 ─────────────────────────────────── */
+  'age.tip': '가장 최근 로그의 시각이다. AEM 이 스토리지로 흘리는 데 보통 2분쯤 걸린다.',
+  'age.stale': ' 3분을 넘었다 — 트래픽이 없거나 파이프라인이 밀렸다.',
+  'age.sec': '{n}초',
+  'age.minSec': '{m}분 {s}초',
+  'age.ago': '· {label} 전',
+
+  /* ── 분포 그래프 ──────────────────────────────────────── */
+  'chart.other': '기타',
+
+  /* ── 복사 ─────────────────────────────────────────────── */
+  'copy.blocked': '클립보드에 접근할 수 없다. 아래를 직접 복사한다.',
+
+  /* ── 계정 관리 ────────────────────────────────────────── */
+  'users.title': '계정 관리',
+  'users.issue': '계정 발급',
+  'users.colAccount': '계정',
+  'users.colRole': '역할',
+  'users.colOrgs': '조직',
+  'users.colLastLogin': '마지막 로그인',
+  'users.me': '나',
+  'users.inactive': '비활성',
+  'users.mustChange': '비번 변경 대기',
+  'users.sessions': '세션 {n}개',
+  'users.revokeTip': '이 계정의 모든 세션을 끊는다. 기기를 잃어버렸을 때 쓴다',
+  'users.revoke': '끊기',
+  'users.edit': '수정',
+  'users.resetPassword': '비번 초기화',
+  'users.deleteSelf': '자기 계정은 지울 수 없다',
+  'users.delete': '계정 삭제',
+  'users.deleteAria': '{email} 계정 삭제',
+  'users.deleteConfirm': '{email} 계정을 지운다. 되돌릴 수 없다.',
+  'users.empty': '계정이 없다.',
+  'users.loadFailed': '계정 목록을 가져오지 못했다',
+  'users.actionFailed': '작업에 실패했다',
+  'users.tempTitle': '임시 비밀번호',
+  'users.tempNote': '이 창을 닫으면 다시 볼 수 없다. 서버에 저장되지 않는다.',
+  'users.tempForce': '첫 로그인에서 비밀번호 변경을 요구한다.',
+  'users.tempOk': '확인했다',
+  'users.editTitle': '계정 수정',
+  'users.emailFixed': '이메일은 바꿀 수 없다',
+  'users.name': '이름',
+  'users.roleMember': 'member — 로그 열람',
+  'users.roleAdmin': 'admin — 계정·감사 로그 관리',
+  'users.roleSelf': '자기 역할은 바꿀 수 없다',
+  'users.active': '활성',
+  'users.activeSelf': '자기 계정은 비활성화할 수 없다',
+  'users.activeHint': '끄면 즉시 로그인과 기존 세션이 막힌다',
+  'users.orgAccess': '조직 접근',
+  'users.orgNote': 'prod 로그에는 실사용자 데이터가 섞인다. 조직 접근과 prod 열람은 따로 준다.',
+  'users.prodRead': 'prod 열람',
+  'users.noOrgs': '.env 에 등록된 조직이 없다.',
+  'users.create': '발급',
+
+  /* ── 감사 로그 ────────────────────────────────────────── */
+  'audit.title': '감사 로그',
+  'audit.readOnly': '기록은 조회만 된다. 삭제 기능은 없다.',
+  'audit.actionAll': 'action 전체',
+  'audit.findEmail': '이메일로 찾기',
+  'audit.colTime': '시각 ({tz})',
+  'audit.colAccount': '계정',
+  'audit.colAction': 'action',
+  'audit.colTarget': '대상',
+  'audit.empty': '조건과 맞는 기록이 없다. 구간이나 action 을 바꿔본다.',
+  'audit.loadFailed': '감사 로그를 가져오지 못했다',
+
+  /* ── 서버가 돌려주는 오류 ─────────────────────────────── */
+  'err.requestFailed': '요청이 실패했다 ({status})',
+} as const;
+
+export type StringKey = keyof typeof ko;
+
+export const en: Record<StringKey, string> = {
+  /* ── common ───────────────────────────────────────────── */
+  'common.cancel': 'Cancel',
+  'common.save': 'Save',
+  'common.copy': 'Copy',
+  'common.copied': 'Copied',
+  'common.none': 'None',
+  'common.all': 'All',
+  'common.on': 'On',
+  'common.off': 'Off',
+  'common.prev': 'Previous',
+  'common.next': 'Next',
+  'common.run': 'Run',
+  'common.from': 'From',
+  'common.to': 'To',
+  'common.email': 'Email',
+  'common.password': 'Password',
+  'common.levelCount': '{n} levels',
+  'common.count': '{n}',
+
+  /* ── header ───────────────────────────────────────────── */
+  'nav.users': 'Accounts',
+  'nav.audit': 'Audit log',
+  'nav.changePassword': 'Change password',
+  'nav.logout': 'Sign out',
+  'nav.language': 'Language',
+
+  /* ── sign in ──────────────────────────────────────────── */
+  'login.subtitle': 'Accounts are issued by an administrator.',
+  'login.submit': 'Sign in',
+  'login.failed': 'Sign-in failed',
+
+  /* ── change password ──────────────────────────────────── */
+  'password.title': 'Change password',
+  'password.forced': 'This is your first sign-in. Change your password to use the rest of the app.',
+  'password.current': 'Current password',
+  'password.new': 'New password',
+  'password.minLength': '{n} characters or more',
+  'password.confirm': 'Confirm new password',
+  'password.mismatch': 'The new passwords do not match',
+  'password.failed': 'Could not change the password',
+
+  /* ── environments ─────────────────────────────────────── */
+  'env.noOrgs': 'No organization is linked to this account. Ask an administrator for org access.',
+  'env.refresh': 'Refresh from Cloud Manager',
+  'env.loadFailed': 'Could not load the environment list',
+  'env.forbidden': 'In .env but not granted to this account: {orgs}',
+  'env.forbiddenHelp':
+    'Org access is granted explicitly by an administrator. Adding an org to .env does not grant it.',
+  'env.forbiddenAdmin': 'Grant it yourself under Accounts.',
+  'env.forbiddenMember': 'Ask an administrator.',
+  'env.goToUsers': 'Go to Accounts',
+  'env.stale': 'Granted to this account but missing from .env: {orgs}',
+  'env.staleHelp':
+    'Removed from .env, or its ORG_n_KEY changed. It is filtered out of this screen.',
+  'env.loading': 'Loading environments',
+  'env.empty':
+    'No environment is visible for this org. Use the refresh above to fetch them from Cloud Manager again.',
+  'env.colEnv': 'Environment',
+  'env.colType': 'Type',
+  'env.colProgram': 'Program',
+  'env.colServices': 'Logs',
+  'env.checkServices': 'Show logs',
+  'env.noOpenable': 'No log this tool can open',
+  'env.tailTip': 'Tail {service} / {name} live',
+  'env.searchTip': 'Search a time range',
+  'env.searchAria': 'Search {service} / {name} over a time range',
+
+  /* ── pane (tail and search) ───────────────────────────── */
+  'pane.filterHere': 'Filter in this pane',
+  'pane.findHere': 'Find in this pane',
+  'pane.regex': 'Regular expression',
+  'pane.regexFilterAria': 'Filter with a regular expression',
+  'pane.regexFindAria': 'Find with a regular expression',
+  'pane.quickPick': 'Presets',
+  'pane.pickLevels': 'Pick levels',
+  'pane.view': 'View',
+  'pane.viewAria': 'View options',
+  'pane.viewAriaBookmarks': 'View options ({n} bookmarked)',
+  'pane.group': 'Group repeats',
+  'pane.groupedLines': '−{n} lines',
+  'pane.onlyBookmarked': 'Bookmarked only',
+  'pane.chart': 'Timeline',
+  'pane.close': 'Close this pane',
+  'pane.pause': 'Pause',
+  'pane.resume': 'Resume {n}',
+  'pane.disconnected': 'Dropped',
+  'pane.opening': 'Opening the log stream',
+  'pane.noMatch': 'Nothing in the buffer matches this filter.',
+  'pane.noMatchHint': 'Clear the filter, or widen the levels.',
+  'pane.noneYet': 'No {levels} has come in yet.',
+  'pane.noneYetAny': 'log line',
+  'pane.noneYetHint': 'Widen the levels, or check that traffic is reaching this environment.',
+  'pane.dropped': 'Buffer overflowed — {n} lines were pushed out',
+  'pane.rollover': 'UTC date rolled over; now reading {date}',
+  'pane.exportSelection': 'Export selection',
+
+  /* ── time-range search ────────────────────────────────── */
+  'search.capped': 'Stopped at the result cap. Narrow the range.',
+  'search.skipped': 'Past the retention window, so not read: {dates}',
+  'search.missing': 'No log on: {dates}',
+  'search.idle': 'Pick a range above and press Run.',
+  'search.idleShared': 'Every pane runs over the same range.',
+  'search.running': 'Scanning — matches fill in as they are found.',
+  'search.empty': 'Nothing in this range matches.',
+  'search.emptyHint': 'Widen the levels, or change the range.',
+  'search.startFailed': 'Could not start the search',
+  'search.streamLost': 'Connection lost',
+  'search.runPanes': 'Run {n} panes',
+  'range.minutes': '{n} min',
+  'range.hours': '{n} h',
+  'range.invalid': 'The end is before the start.',
+  'range.lagHint':
+    'Logs take about {lag} minutes to reach storage. Over a {range}-minute range, the last {tail} minutes may still be empty.',
+
+  /* ── splitting ────────────────────────────────────────── */
+  'panes.count': 'Panes {n}/{max}',
+  'panes.add': '+ Add pane',
+  'panes.maxTail': '{max} panes is the limit (the browser caps connections)',
+  'panes.maxSearch': '{max} panes is the limit',
+  'panes.addTipTail': 'Watch another environment or log alongside this one',
+  'panes.addTipSearch': 'Compare another environment or log over the same range',
+  'panes.noTarget': 'Nothing to show. Pick a log from the environments screen.',
+  'split.row': 'Side by side',
+  'split.column': 'Stacked',
+  'split.autoTail': 'Chosen automatically from the window width. Pick one and it is remembered.',
+  'split.manualTail': 'Your own choice. It holds regardless of window width.',
+  'split.auto': 'Chosen automatically from the window width',
+  'split.manual': 'Your own choice',
+
+  /* ── add pane ─────────────────────────────────────────── */
+  'picker.title': 'Add pane',
+  'picker.already': 'Already open',
+  'picker.noLogs': 'This environment has no log that can be opened.',
+  'picker.otherEnv': 'Open logs from another environment on the environments screen.',
+
+  /* ── a log line ───────────────────────────────────────── */
+  'line.bookmark': 'Bookmark',
+  'line.bookmarkTip': 'Bookmark — kept even after it falls out of the buffer',
+  'line.unbookmark': 'Remove bookmark',
+  'line.grouped': '{n} occurrences of the same event, grouped',
+  'line.masked': 'Sensitive data was masked',
+  'line.stack': '{n} more line|{n} more lines',
+  'line.expandAria': 'Expand {n} more lines',
+  'line.collapseAria': 'Collapse {n} more lines',
+
+  /* ── viewer ───────────────────────────────────────────── */
+  'viewer.newLines': '{n} new — jump to the end',
+  'viewer.toBottom': 'Jump to the end',
+  'viewer.following': 'Following',
+  'viewer.selectedGroups': '{groups} groups · {lines} lines',
+  'viewer.selectedLines': '{n} line selected|{n} lines selected',
+  'viewer.shiftHint': 'Shift-click the last line to select the range',
+  'viewer.clearSelection': 'Clear',
+
+  /* ── export ───────────────────────────────────────────── */
+  'export.title': 'Export selection',
+  'export.lines': 'Saves {n} lines to a file. Masking is already applied.',
+  'export.format': 'Format',
+  'export.hintLog': 'Raw lines, as they came',
+  'export.hintJson': 'JSONL — one LogEntry per line',
+  'export.hintCsv': 'ts, level, pod, thread, logger, message',
+  'export.stack': 'Include stack traces',
+  'export.headerNote':
+    'The org, environment, range, filter, and requester are written at the top of the file. Months later you can still tell where it came from.',
+  'export.submit': 'Export',
+  'export.failed': 'Export failed',
+
+  /* ── saved filters ────────────────────────────────────── */
+  'filters.label': 'Filters',
+  'filters.saved': 'Saved',
+  'filters.empty': 'None yet',
+  'filters.saveCurrent': 'Save current…',
+  'filters.title': 'Save these conditions',
+  'filters.name': 'Name',
+  'filters.namePlaceholder': 'e.g. prod ERROR, last 6h',
+  'filters.noteSearch':
+    'Levels, query, and range length are saved. The exact start and end are not — the length is reapplied from now next time.',
+  'filters.noteTail': 'Levels and query are saved.',
+  'filters.saveFailed': 'Could not save',
+
+  /* ── text size ────────────────────────────────────────── */
+  'font.label': 'Text size',
+  'font.xs': 'Tiny',
+  'font.sm': 'Small',
+  'font.md': 'Normal',
+  'font.lg': 'Large',
+
+  /* ── age of the newest line ───────────────────────────── */
+  'age.tip':
+    'When the newest line was written. AEM usually takes about two minutes to flush it to storage.',
+  'age.stale': ' Over three minutes — either no traffic, or the pipeline is behind.',
+  'age.sec': '{n}s',
+  'age.minSec': '{m}m {s}s',
+  'age.ago': '· {label} ago',
+
+  /* ── histogram ────────────────────────────────────────── */
+  'chart.other': 'other',
+
+  /* ── clipboard ────────────────────────────────────────── */
+  'copy.blocked': 'The clipboard is not available. Copy the text below by hand.',
+
+  /* ── accounts ─────────────────────────────────────────── */
+  'users.title': 'Accounts',
+  'users.issue': 'Add account',
+  'users.colAccount': 'Account',
+  'users.colRole': 'Role',
+  'users.colOrgs': 'Orgs',
+  'users.colLastLogin': 'Last sign-in',
+  'users.me': 'you',
+  'users.inactive': 'Disabled',
+  'users.mustChange': 'Password change pending',
+  'users.sessions': '{n} session|{n} sessions',
+  'users.revokeTip': 'Ends every session for this account. Use it when a device is lost.',
+  'users.revoke': 'Sign out',
+  'users.edit': 'Edit',
+  'users.resetPassword': 'Reset password',
+  'users.deleteSelf': 'You cannot delete your own account',
+  'users.delete': 'Delete account',
+  'users.deleteAria': 'Delete the account {email}',
+  'users.deleteConfirm': 'Delete the account {email}. This cannot be undone.',
+  'users.empty': 'No accounts.',
+  'users.loadFailed': 'Could not load the account list',
+  'users.actionFailed': 'That did not work',
+  'users.tempTitle': 'Temporary password',
+  'users.tempNote': 'Once you close this you cannot see it again. It is not stored on the server.',
+  'users.tempForce': 'A password change is required at first sign-in.',
+  'users.tempOk': 'Got it',
+  'users.editTitle': 'Edit account',
+  'users.emailFixed': 'The email cannot be changed',
+  'users.name': 'Name',
+  'users.roleMember': 'member — read logs',
+  'users.roleAdmin': 'admin — manage accounts and the audit log',
+  'users.roleSelf': 'You cannot change your own role',
+  'users.active': 'Active',
+  'users.activeSelf': 'You cannot disable your own account',
+  'users.activeHint': 'Turning this off blocks sign-in and existing sessions immediately',
+  'users.orgAccess': 'Org access',
+  'users.orgNote':
+    'prod logs carry real user data. Org access and prod access are granted separately.',
+  'users.prodRead': 'prod access',
+  'users.noOrgs': 'No org is configured in .env.',
+  'users.create': 'Create',
+
+  /* ── audit log ────────────────────────────────────────── */
+  'audit.title': 'Audit log',
+  'audit.readOnly': 'Records can only be read. There is no delete.',
+  'audit.actionAll': 'All actions',
+  'audit.findEmail': 'Find by email',
+  'audit.colTime': 'Time ({tz})',
+  'audit.colAccount': 'Account',
+  'audit.colAction': 'Action',
+  'audit.colTarget': 'Target',
+  'audit.empty': 'Nothing matches. Change the range or the action.',
+  'audit.loadFailed': 'Could not load the audit log',
+
+  /* ── errors from the server ───────────────────────────── */
+  'err.requestFailed': 'The request failed ({status})',
+};
