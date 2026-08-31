@@ -51,7 +51,17 @@ const serverSchema = z.object({
   SESSION_SECRET: required('openssl rand -hex 32 로 만든 값을 넣는다').pipe(
     z.string().min(32, '32자 이상이어야 한다 (openssl rand -hex 32)'),
   ),
+  /**
+   * 유휴 기준 유효기간. 쓰는 동안에는 이 길이만큼 계속 연장된다.
+   * 이 값이 곧 '아무도 안 건드렸을 때 로그인이 풀리는 시간' 이다.
+   */
   SESSION_TTL_HOURS: int(12, 1),
+  /**
+   * 연장의 천장. 처음 로그인한 뒤 이만큼 지나면 계속 쓰고 있어도 다시 로그인해야 한다.
+   * 모니터에 걸어두는 화면 때문에 무한 연장으로 두면, 상시 로그인된 브라우저가
+   * 그대로 상시 유효한 자격증명이 된다.
+   */
+  SESSION_MAX_HOURS: int(168, 1),
   SESSION_COOKIE_SECURE: bool(false),
   /**
    * 리버스 프록시/터널 뒤에 둘 때만 켠다.
@@ -84,6 +94,9 @@ const serverSchema = z.object({
    * 그 동안 모든 tail 이 멈춘다.
    */
   AUDIT_RETENTION_DAYS: int(365, 0),
+}).refine((c) => c.SESSION_MAX_HOURS >= c.SESSION_TTL_HOURS, {
+  path: ['SESSION_MAX_HOURS'],
+  message: 'SESSION_TTL_HOURS 보다 짧을 수 없다. 연장의 천장이지 유효기간이 아니다',
 });
 
 const orgSchema = z.object({

@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import type { LogEntry } from '../../shared/types.js';
 import { createParser, type LogParser } from '../parse/parser.js';
 import { maskEntry, type Masker } from '../parse/mask.js';
@@ -56,6 +57,15 @@ export function utcDate(ms: number): string {
  */
 export class TailSession {
   readonly key: TailKey;
+  /**
+   * 이 세션 인스턴스의 세대. 세션이 다시 만들어지면 seq 가 0부터 다시 시작하므로,
+   * 클라이언트는 이 값이 바뀐 것을 보고 쌓아둔 것을 버려야 한다.
+   *
+   * 이게 없으면 재연결 후 새 엔트리의 seq 가 화면의 마지막 seq 보다 작아서
+   * 클라이언트의 upsert 가 전부 조용히 버린다 — 화면은 '연결됨' 인데 로그만 안 늘어난다.
+   * 가장 나쁜 종류의 고장이라 세대를 명시적으로 실어 보낸다.
+   */
+  readonly generation: string = randomUUID();
   private readonly transport: TailTransport;
   private readonly masker: Masker;
   private readonly now: () => number;

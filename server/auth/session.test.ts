@@ -3,8 +3,15 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { eq } from 'drizzle-orm';
 import { openDb, type DbHandle } from '../db/index.js';
-import { users, userOrgs } from '../db/schema.js';
-import { createSession, destroySession, destroyUserSessions, purgeExpiredSessions, resolveSession } from './session.js';
+import { users, userOrgs, sessions } from '../db/schema.js';
+import {
+  createSession,
+  destroySession,
+  destroyUserSessions,
+  purgeExpiredSessions,
+  resolveSession,
+  touchSession,
+} from './session.js';
 
 let handle: DbHandle;
 
@@ -119,5 +126,63 @@ describe('세션', () => {
     const { id } = createSession(handle.db, uid, 12, undefined);
     handle.db.delete(users).where(eq(users.id, uid)).run();
     assert.equal(resolveSession(handle.db, id), null);
+  });
+});
+
+/**
+ * 모니터에 걸어두는 화면 때문에 넣은 것이다.
+ * 연장이 안 되면 하루에 한 번 사람이 가서 로그인해야 하고,
+ * 천장이 없으면 상시 로그인된 브라우저가 그대로 상시 유효한 자격증명이 된다.
+ */
+describe('세션 — 슬라이딩 연장', () => {
+  /** 만료 시각을 직접 옮겨 '시간이 흐른' 상황을 만든다 */
+  function setExpiry(id: string, expiresAt: number): void {
+    handle.db.update(sessions).set({ expiresAt }).where(eq(sessions.id, id)).run();
+  }
+
+  test('절반 넘게 남았으면 건드리지 않는다 — 요청마다 DB 를 쓰지 않는다', () => {
+    const uid = makeUser();
+    const { id } = createSession(handle.db, uid, 12, undefined);
+    const su = resolveSession(handle.db, id)!;
+    assert.equal(touchSession(handle.db, su, 12, 168), null);
+  });
+
+  test('절반 아래로 내려가면 연장한다', () => {
+    const uid = makeUser();
+    const { id } = createSession(handle.db, uid, 12, undefined);
+    setExpiry(id, Date.now() + 3600_000); // 1시간 남음 (12시간의 절반 아래)
+
+    const su = resolveSession(handle.db, id)!;
+    const next = touchSession(handle.db, su, 12, 168);
+    assert.ok(next !== null, '연장돼야 한다');
+    assert.ok(next > su.expiresAt);
+    assert.equal(resolveSession(handle.db, id)!.expiresAt, next, 'DB 에도 반영돼야 한다');
+  });
+
+  test('절대 상한을 넘겨서는 연장하지 않는다', () => {
+    const uid = makeUser();
+    const { id } = createSession(handle.db, uid, 12, undefined);
+    const now = Date.now();
+    // 만들어진 지 이미 168시간이 지난 세션
+    handle.db
+      .update(sessions)
+      .set({ createdAt: now - 168 * 3600_000, expiresAt: now + 3600_000 })
+      .where(eq(sessions.id, id))
+      .run();
+
+    const su = resolveSession(handle.db, id)!;
+    assert.equal(touchSession(handle.db, su, 12, 168), null, '천장에 닿았으면 그대로 만료돼야 한다');
+  });
+
+  test('상한 직전에는 상한까지만 연장한다', () => {
+    const uid = makeUser();
+    const { id } = createSession(handle.db, uid, 12, undefined);
+    const now = Date.now();
+    const createdAt = now - 167 * 3600_000; // 상한까지 1시간 남음
+    handle.db.update(sessions).set({ createdAt, expiresAt: now + 60_000 }).where(eq(sessions.id, id)).run();
+
+    const su = resolveSession(handle.db, id)!;
+    const next = touchSession(handle.db, su, 12, 168)!;
+    assert.equal(next, createdAt + 168 * 3600_000, '12시간이 아니라 남은 1시간만 준다');
   });
 });

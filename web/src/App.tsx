@@ -1,7 +1,9 @@
+import { useEffect } from 'react';
 import { AppShell, Box, Button, Center, Group, Loader, Menu, Text } from '@mantine/core';
 import { Navigate, Route, Routes } from 'react-router-dom';
 import { SessionProvider, useSession } from './api/session';
 import { LangProvider, useT } from './i18n';
+import { ErrorBoundary, noteHealthy } from './components/ErrorBoundary';
 import { LangToggle } from './components/LangToggle';
 import { api } from './api/client';
 import { LoginPage } from './pages/LoginPage';
@@ -15,6 +17,13 @@ import { AdminAuditPage } from './pages/AdminAuditPage';
 function Shell() {
   const { me, loading, setMe } = useSession();
   const t = useT();
+
+  // 1분을 멀쩡히 버텼으면 그 전의 실패는 잊는다. 안 그러면 어제 한 번 터진 것 때문에
+  // 오늘의 첫 자동 새로고침이 5분 뒤로 밀린다.
+  useEffect(() => {
+    const t = setTimeout(noteHealthy, 60_000);
+    return () => clearTimeout(t);
+  }, []);
 
   if (loading) {
     return (
@@ -84,15 +93,21 @@ function Shell() {
           막대가 안 뜨고, 넘치는 화면만 스크롤된다.
         */}
         <Box style={{ height: '100%', overflow: 'auto' }}>
-          <Routes>
-            <Route path="/" element={<EnvironmentsPage />} />
-            <Route path="/tail" element={<TailPage />} />
-            <Route path="/search" element={<SearchPage />} />
-            {me.role === 'admin' && <Route path="/admin/users" element={<AdminUsersPage />} />}
-            {me.role === 'admin' && <Route path="/admin/audit" element={<AdminAuditPage />} />}
-            <Route path="/password" element={<ChangePasswordPage forced={false} />} />
-            <Route path="*" element={<Navigate to="/" replace />} />
-          </Routes>
+          {/*
+            창 하나가 터져도 머리줄은 남아야 사람이 다른 데로 갈 수 있다.
+            바깥 경계는 이것마저 실패했을 때를 위한 것이다.
+          */}
+          <ErrorBoundary>
+            <Routes>
+              <Route path="/" element={<EnvironmentsPage />} />
+              <Route path="/tail" element={<TailPage />} />
+              <Route path="/search" element={<SearchPage />} />
+              {me.role === 'admin' && <Route path="/admin/users" element={<AdminUsersPage />} />}
+              {me.role === 'admin' && <Route path="/admin/audit" element={<AdminAuditPage />} />}
+              <Route path="/password" element={<ChangePasswordPage forced={false} />} />
+              <Route path="*" element={<Navigate to="/" replace />} />
+            </Routes>
+          </ErrorBoundary>
         </Box>
       </AppShell.Main>
     </AppShell>
@@ -102,9 +117,11 @@ function Shell() {
 export function App() {
   return (
     <LangProvider>
-      <SessionProvider>
-        <Shell />
-      </SessionProvider>
+      <ErrorBoundary>
+        <SessionProvider>
+          <Shell />
+        </SessionProvider>
+      </ErrorBoundary>
     </LangProvider>
   );
 }

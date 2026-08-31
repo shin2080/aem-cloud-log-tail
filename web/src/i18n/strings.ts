@@ -256,6 +256,16 @@ export const ko = {
   'audit.empty': '조건과 맞는 기록이 없다. 구간이나 action 을 바꿔본다.',
   'audit.loadFailed': '감사 로그를 가져오지 못했다',
 
+  /* ── 화면이 터졌을 때 ─────────────────────────────────── */
+  'crash.title': '화면이 멈췄다',
+  'crash.detail': '이 창을 다시 그리다 오류가 났다. 로그 자체는 서버에 그대로 있다.',
+  'crash.reloadIn': '{n}초 뒤에 스스로 새로고침한다',
+  'crash.reloadNow': '지금 새로고침',
+
+  /* ── 로그인이 끊겼을 때 ───────────────────────────────── */
+  'session.expiredTitle': '로그인이 만료됐다',
+  'session.expiredDetail': '다시 로그인하면 보던 창이 그대로 열린다.',
+
   /* ── 서버가 돌려주는 오류 ─────────────────────────────── */
   'err.requestFailed': '요청이 실패했다 ({status})',
 } as const;
@@ -517,6 +527,16 @@ export const en: Record<StringKey, string> = {
   'audit.colTarget': 'Target',
   'audit.empty': 'Nothing matches. Change the range or the action.',
   'audit.loadFailed': 'Could not load the audit log',
+
+  /* ── when the view crashes ────────────────────────────── */
+  'crash.title': 'This view stopped',
+  'crash.detail': 'Rendering this view threw. The logs themselves are untouched on the server.',
+  'crash.reloadIn': 'Reloading by itself in {n} second|Reloading by itself in {n} seconds',
+  'crash.reloadNow': 'Reload now',
+
+  /* ── when the session drops ───────────────────────────── */
+  'session.expiredTitle': 'Your session expired',
+  'session.expiredDetail': 'Sign in again and the panes you had open come back.',
 
   /* ── errors from the server ───────────────────────────── */
   'err.requestFailed': 'The request failed ({status})',

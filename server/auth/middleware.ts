@@ -1,7 +1,8 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import '@fastify/cookie'; // FastifyRequest.cookies / FastifyReply.clearCookie 타입 확장
 import type { AppContext } from '../context.js';
-import { SESSION_COOKIE, resolveSession, type SessionUser } from './session.js';
+import { SESSION_COOKIE, resolveSession, touchSession, type SessionUser } from './session.js';
+import { sessionCookieOptions } from './cookie.js';
 import { langFrom, msg, type MsgKey, type MsgParams } from '../i18n/messages.js';
 
 declare module 'fastify' {
@@ -46,6 +47,21 @@ export function registerAuthGuard(app: FastifyInstance, ctx: AppContext): void {
     }
 
     req.sessionUser = su;
+
+    /*
+      쓰는 동안에는 연장한다.
+
+      SSE 는 한 번 열고 끝이라 연결 자체로는 세션이 갱신되지 않는다.
+      화면이 주기적으로 /api/auth/me 를 두드려 여기까지 오게 되어 있다.
+      쿠키에도 만료가 박히므로 DB 만 늘리면 브라우저가 먼저 쿠키를 버린다 — 같이 다시 심는다.
+    */
+    const renewed = touchSession(ctx.handle.db, su, ctx.cfg.SESSION_TTL_HOURS, ctx.cfg.SESSION_MAX_HOURS);
+    if (renewed !== null) {
+      reply.setCookie(SESSION_COOKIE, su.sessionId, {
+        ...sessionCookieOptions(ctx.cfg),
+        expires: new Date(renewed),
+      });
+    }
 
     const path = req.url.split('?')[0]!;
     if (su.user.mustChangePassword === 1 && !ALLOWED_WHILE_LOCKED.has(path)) {

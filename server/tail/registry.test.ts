@@ -130,6 +130,27 @@ describe('TailRegistry — 유휴 정리', () => {
     assert.equal(reg.activeCount, 1);
     assert.equal(CountingTransport.created, 2);
   });
+
+  /**
+   * 새 세션은 seq 가 0부터 다시 시작한다. 클라이언트가 그걸 알아채지 못하면
+   * 새 엔트리를 전부 조용히 버려서, 화면은 '연결됨' 인데 로그만 안 늘어난다.
+   * 세대가 실제로 달라지는지는 여기서 못 박아둔다.
+   */
+  test('다시 만들어진 세션은 세대가 다르다', async () => {
+    const a = await reg.subscribe(KEY, org, '1', () => {});
+    const first = a.session.generation;
+    a.unsubscribe();
+    await sleep(1300);
+
+    const b = await reg.subscribe(KEY, org, '1', () => {});
+    assert.notEqual(b.session.generation, first);
+  });
+
+  test('같은 세션을 공유하면 세대도 같다', async () => {
+    const a = await reg.subscribe(KEY, org, '1', () => {});
+    const b = await reg.subscribe(KEY, org, '1', () => {});
+    assert.equal(a.session.generation, b.session.generation);
+  });
 });
 
 describe('TailRegistry — 실패와 종료', () => {

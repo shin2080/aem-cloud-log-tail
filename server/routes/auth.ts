@@ -4,6 +4,7 @@ import { eq } from 'drizzle-orm';
 import type { AppContext } from '../context.js';
 import { users, userOrgs } from '../db/schema.js';
 import { SESSION_COOKIE, createSession, destroySession, destroyUserSessions } from '../auth/session.js';
+import { sessionCookieOptions } from '../auth/cookie.js';
 import {
   verifyPassword,
   hashPassword,
@@ -29,12 +30,7 @@ export function registerAuthRoutes(app: FastifyInstance, ctx: AppContext): void 
   const { db } = ctx.handle;
   const { cfg } = ctx;
 
-  const cookieOpts = {
-    httpOnly: true,
-    sameSite: 'strict' as const,
-    path: '/',
-    secure: cfg.SESSION_COOKIE_SECURE,
-  };
+  const cookieOpts = sessionCookieOptions(cfg);
 
   app.post('/api/auth/login', async (req, reply) => {
     const parsed = loginBody.safeParse(req.body);

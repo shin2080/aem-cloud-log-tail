@@ -78,6 +78,18 @@ export function useTailStream(params: TailParams | null): TailState & {
   const parked = useRef<LogEntry[]>([]);
   const pausedRef = useRef(false);
 
+  /**
+   * 마지막으로 확인한 서버 세션의 세대.
+   *
+   * EventSource 는 끊기면 스스로 다시 붙는데, 그 사이 서버 세션이 유휴 정리되거나
+   * 서버가 재시작했으면 seq 가 0부터 다시 시작한다. 그러면 새 엔트리의 seq 가
+   * 화면의 마지막 seq 보다 작아서 upsert 가 전부 버린다 —
+   * 화면은 '연결됨' 인데 로그만 안 늘어나는, 모니터에 걸어두면 알 수 없는 고장이다.
+   */
+  const generation = useRef<string | null>(null);
+  /** 화면에 있는 마지막 seq. 세대가 없던 옛 서버까지 대비한 2차 방어선이다. */
+  const newestSeq = useRef(-1);
+
   const url = useMemo(() => {
     if (!params) return null;
     const q = new URLSearchParams({
@@ -103,6 +115,7 @@ export function useTailStream(params: TailParams | null): TailState & {
 
   const clear = useCallback(() => {
     parked.current = [];
+    newestSeq.current = -1;
     setPendingCount(0);
     setEntries([]);
     setDroppedCount(0);
@@ -119,19 +132,50 @@ export function useTailStream(params: TailParams | null): TailState & {
     setDroppedCount(0);
     setRolloverDate(null);
     parked.current = [];
+    generation.current = null;
+    newestSeq.current = -1;
     setPendingCount(0);
     setStatus('connecting');
+
+    /** 서버 세션이 새로 만들어졌다. 쌓아둔 것은 이제 다른 세계의 seq 다. */
+    const resetForNewSession = (): void => {
+      parked.current = [];
+      newestSeq.current = -1;
+      setPendingCount(0);
+      setDroppedCount(0);
+      setEntries([]);
+    };
 
     // 세션 쿠키가 자동으로 실린다. WebSocket 대신 SSE 를 쓰는 이유다.
     const es = new EventSource(url);
 
-    es.addEventListener('ready', () => {
+    es.addEventListener('ready', (ev) => {
+      const data = (ev as MessageEvent<string>).data;
+      const info = data ? (JSON.parse(data) as { generation?: string }) : null;
+      // 처음 붙는 것이면 세대만 기억한다. 이미 알던 세션과 다르면 화면을 비운다.
+      if (info?.generation) {
+        if (generation.current !== null && generation.current !== info.generation) resetForNewSession();
+        generation.current = info.generation;
+      }
       setStatus('open');
       setError(null);
     });
 
     es.addEventListener('entries', (ev) => {
       const { entries: batch } = JSON.parse((ev as MessageEvent<string>).data) as { entries: LogEntry[] };
+      if (batch.length === 0) return;
+
+      /*
+        세대를 못 받았을 때를 위한 2차 방어선.
+
+        한 세션 안에서 seq 는 늘기만 한다. 재연결로 버퍼 전체를 다시 받으면
+        배치의 '첫' seq 는 뒤로 갈 수 있지만 '마지막' seq 는 절대 뒤로 가지 않는다.
+        마지막이 뒤로 갔다면 세션이 다시 시작한 것이다.
+      */
+      const batchNewest = batch[batch.length - 1]!.seq;
+      if (newestSeq.current >= 0 && batchNewest < newestSeq.current) resetForNewSession();
+      newestSeq.current = Math.max(newestSeq.current, batchNewest);
+
       if (pausedRef.current) {
         parked.current = upsertAll(parked.current, batch);
         setPendingCount(parked.current.length);

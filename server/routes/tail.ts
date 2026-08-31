@@ -131,6 +131,13 @@ export function registerTailRoutes(app: FastifyInstance, ctx: AppContext): void 
 
     try {
       handle = await ctx.tails.subscribe(key, grant.org, grant.env.programId, onEvent);
+      // 세션을 여는 동안(IMS 토큰 + 로그 목록 + 서명 URL) 클라이언트가 떠났을 수 있다.
+      // cleanup 은 이미 지나갔고 그때 handle 은 아직 undefined 였다 —
+      // 여기서 직접 해지하지 않으면 구독자가 영영 남아 폴링 루프와 링버퍼가 안 죽는다.
+      if (closed) {
+        handle.unsubscribe();
+        return reply;
+      }
     } catch (err) {
       req.log.error({ err, key }, 'tail session start failed');
       sse(reply, 'error', {
@@ -161,6 +168,8 @@ export function registerTailRoutes(app: FastifyInstance, ctx: AppContext): void 
 
     sse(reply, 'ready', {
       sessionId: `${key.orgKey}:${key.environmentId}:${key.service}:${key.logName}`,
+      // 세션이 다시 만들어졌으면 seq 가 0부터다. 클라이언트는 이 값으로 그걸 안다.
+      generation: handle.session.generation,
       bufferedCount: initial.length,
       oldestSeq: state.oldestSeq,
       newestSeq: state.newestSeq,
