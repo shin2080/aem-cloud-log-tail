@@ -271,6 +271,12 @@ export const ko = {
   'session.expiredDetail': '다시 로그인하면 보던 창이 그대로 열린다.',
 
 
+  /* ── 설치 안내 ────────────────────────────────────────── */
+  'install.pitch': '설치형으로 열면 창 장식 없이 뜨고 알림도 앱처럼 나온다.',
+  'install.pitchIos': '공유 → 홈 화면에 추가 하면 앱처럼 열린다.',
+  'install.action': '설치',
+  'install.dismiss': '이 안내 닫기',
+
   /* ── 알림 ─────────────────────────────────────────────── */
   'alerts.title': '알림',
   'alerts.bellAria': '알림 {n}건',
@@ -595,6 +601,12 @@ export const en: Record<StringKey, string> = {
   'session.expiredTitle': 'Your session expired',
   'session.expiredDetail': 'Sign in again and the panes you had open come back.',
 
+
+  /* ── install prompt ───────────────────────────────────── */
+  'install.pitch': 'Installed, it opens without browser chrome and notifies like an app.',
+  'install.pitchIos': 'Share → Add to Home Screen opens it like an app.',
+  'install.action': 'Install',
+  'install.dismiss': 'Dismiss',
 
   /* ── alerts ───────────────────────────────────────────── */
   'alerts.title': 'Alerts',

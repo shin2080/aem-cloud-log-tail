@@ -16,10 +16,12 @@ import { AdminUsersPage } from './pages/AdminUsersPage';
 import { AdminAuditPage } from './pages/AdminAuditPage';
 import { AlertRulesPage } from './pages/AlertRulesPage';
 import { AlertBell } from './components/AlertBell';
+import { InstallBanner, useInstallBanner, INSTALL_BANNER_HEIGHT } from './components/InstallBanner';
 
 function Shell() {
   const { me, loading, setMe } = useSession();
   const t = useT();
+  const install = useInstallBanner();
 
   // 1분을 멀쩡히 버텼으면 그 전의 실패는 잊는다. 안 그러면 어제 한 번 터진 것 때문에
   // 오늘의 첫 자동 새로고침이 5분 뒤로 밀린다.
@@ -49,10 +51,14 @@ function Shell() {
     setMe(null);
   };
 
+  // 배너가 뜨면 머리줄이 그만큼 두꺼워진다. 본문 여백이 같은 값을 써야 어긋나지 않는다.
+  const headerHeight = 44 + (install === 'hidden' ? 0 : INSTALL_BANNER_HEIGHT);
+
   return (
-    <AppShell header={{ height: 44 }} padding={0} style={{ height: '100%' }}>
+    <AppShell header={{ height: headerHeight }} padding={0} style={{ height: '100%' }}>
       <AppShell.Header>
-        <Group h="100%" px="sm" justify="space-between">
+        <InstallBanner state={install} />
+        <Group h={44} px="sm" justify="space-between">
           <Group gap="sm">
             <Text size="sm" fw={600} component="a" href="/" style={{ textDecoration: 'none', color: 'inherit' }}>
               AEM Cloud Log Viewer
@@ -95,7 +101,7 @@ function Shell() {
         </Group>
       </AppShell.Header>
 
-      <AppShell.Main style={{ height: '100%', paddingTop: 44, boxSizing: 'border-box' }}>
+      <AppShell.Main style={{ height: '100%', paddingTop: headerHeight, boxSizing: 'border-box' }}>
         {/*
           tail·조회는 스스로 높이를 나눠 쓰므로 여기서 자르면 안 되고, 목록 화면은
           내용이 길면 넘친다. auto 면 둘 다 맞는다 — 100% 인 화면은 넘칠 일이 없어
