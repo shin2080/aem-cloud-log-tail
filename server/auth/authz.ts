@@ -22,17 +22,50 @@ export interface EnvGrant extends OrgGrant {
  * 정보가 새어 나간다. 존재 여부 자체를 흘리지 않는다.
  */
 
-/** 2. 요청의 orgKey 가 user_orgs 에 있는가 */
-export function authorizeOrg(ctx: AppContext, su: SessionUser, orgKey: string, reply: FastifyReply): OrgGrant | null {
+/**
+ * 판단만 한다. 응답은 쓰지 않는다.
+ *
+ * SSE 는 헤더를 이미 내보낸 뒤에도 주기적으로 권한을 다시 봐야 한다 —
+ * 상시로 열어두는 스트림이라 '연결할 때 한 번' 은 사실상 검사를 안 하는 것과 같다.
+ * 그때는 404 를 쓸 수가 없으므로 결정과 응답을 갈라둔다.
+ */
+export function checkOrgAccess(ctx: AppContext, su: SessionUser, orgKey: string): OrgGrant | null {
   const access = su.orgs.find((o) => o.orgKey === orgKey);
   const org = ctx.cfg.orgs.get(orgKey);
 
   // .env 에서 조직이 빠졌는데 DB 에 권한만 남아 있는 경우도 여기서 걸린다.
-  if (!access || !org) {
+  if (!access || !org) return null;
+  return { org, allowProd: access.allowProd };
+}
+
+/** 위와 같은 판단. 조직 경계 안인지, prod 를 볼 수 있는지까지 본다. */
+export function checkEnvAccess(
+  ctx: AppContext,
+  su: SessionUser,
+  orgKey: string,
+  environmentId: string,
+): EnvGrant | null {
+  const grant = checkOrgAccess(ctx, su, orgKey);
+  if (!grant) return null;
+
+  // 캐시에 없다 = 이 조직의 환경이 아니거나 아직 새로고침하지 않았다.
+  const env = readEnv(ctx.handle.db, orgKey, environmentId);
+  if (!env) return null;
+
+  // prod 로그에는 실사용자 데이터가 섞인다. 조직 접근 권한과 prod 열람 권한은 별개다.
+  if (env.environmentType === 'prod' && !grant.allowProd) return null;
+
+  return { ...grant, env };
+}
+
+/** 2. 요청의 orgKey 가 user_orgs 에 있는가 */
+export function authorizeOrg(ctx: AppContext, su: SessionUser, orgKey: string, reply: FastifyReply): OrgGrant | null {
+  const grant = checkOrgAccess(ctx, su, orgKey);
+  if (!grant) {
     fail(reply, 404, 'not_found', 'not_found');
     return null;
   }
-  return { org, allowProd: access.allowProd };
+  return grant;
 }
 
 /**
@@ -48,21 +81,10 @@ export function authorizeEnv(
   environmentId: string,
   reply: FastifyReply,
 ): EnvGrant | null {
-  const grant = authorizeOrg(ctx, su, orgKey, reply);
-  if (!grant) return null;
-
-  const env = readEnv(ctx.handle.db, orgKey, environmentId);
-  if (!env) {
-    // 캐시에 없다 = 이 조직의 환경이 아니거나 아직 새로고침하지 않았다.
+  const grant = checkEnvAccess(ctx, su, orgKey, environmentId);
+  if (!grant) {
     fail(reply, 404, 'not_found', 'not_found');
     return null;
   }
-
-  // prod 로그에는 실사용자 데이터가 섞인다. 조직 접근 권한과 prod 열람 권한은 별개다.
-  if (env.environmentType === 'prod' && !grant.allowProd) {
-    fail(reply, 404, 'not_found', 'not_found');
-    return null;
-  }
-
-  return { ...grant, env };
+  return grant;
 }

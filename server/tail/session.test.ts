@@ -23,6 +23,11 @@ class FakeTransport implements TailTransport {
   readonly reads: { url: string; offset: number }[] = [];
   /** 특정 날짜의 tail URL 발급을 실패시킨다 */
   failUrlFor: string | null = null;
+  /**
+   * 다음 읽기부터 이 상태와 본문을 돌려준다 (서명 URL 만료 등).
+   * null 이면 정상 동작으로 돌아간다.
+   */
+  errorResponse: { status: number; body: string } | null = null;
 
   append(date: string, text: string): void {
     this.files.set(date, (this.files.get(date) ?? '') + text);
@@ -49,6 +54,10 @@ class FakeTransport implements TailTransport {
 
   async readFrom(url: string, offset: number): Promise<RangeRead> {
     this.reads.push({ url, offset });
+    if (this.errorResponse) {
+      const body = Buffer.from(this.errorResponse.body, 'utf8');
+      return { status: this.errorResponse.status, bytes: new Uint8Array(body), totalSize: -1 };
+    }
     const buf = Buffer.from(this.files.get(this.dateOf(url)) ?? '', 'utf8');
     if (offset >= buf.byteLength) return { status: 416, bytes: new Uint8Array(0), totalSize: buf.byteLength };
     const slice = buf.subarray(offset);
@@ -482,5 +491,77 @@ describe('TailSession — 구독', () => {
     h.transport.append('2026-08-28', line('2026-08-28', '12:00:01.000') + '\n');
     await h.session.pollOnce();
     assert.ok(seen.length > 0);
+  });
+});
+
+/**
+ * 서명 URL 은 TTL 이 24시간이고, 예전에는 UTC 자정 롤오버에서만 다시 받았다.
+ * 롤오버 간격이 최대 24시간이라 만료까지 여유가 사실상 0 이었다 —
+ * 며칠씩 켜두는 쓰임에서는 언젠가 반드시 걸린다.
+ */
+describe('TailSession — 서명 URL 만료', () => {
+  const AZURE_403 =
+    '<?xml version="1.0" encoding="utf-8"?><Error><Code>AuthenticationFailed</Code>' +
+    '<Message>Signature not valid in the specified time frame.</Message></Error>';
+
+  test('403 본문을 로그로 먹지 않는다 ← 여기가 핵심', async () => {
+    const h = harness(T('2026-08-28', '12:00:00'));
+    h.transport.append('2026-08-28', line('2026-08-28', '12:00:00.000', 'INFO', '진짜 로그') + '\n');
+    await h.session.start();
+
+    const offsetBefore = h.session.byteOffset;
+    h.transport.errorResponse = { status: 403, body: AZURE_403 };
+
+    await assert.rejects(() => h.session.pollOnce(), '오류 응답은 던져야 한다');
+
+    const texts = [...h.entries().values()].map((e) => e.raw).join('\n');
+    assert.ok(!texts.includes('AuthenticationFailed'), '오류 XML 이 로그 줄로 들어왔다');
+    assert.equal(h.session.byteOffset, offsetBefore, '오프셋이 오류 본문만큼 앞질렀다 — 그 뒤 로그를 영영 놓친다');
+  });
+
+  test('오류를 만나면 다음 폴링에서 URL 부터 다시 받는다', async () => {
+    const h = harness(T('2026-08-28', '12:00:00'));
+    h.transport.append('2026-08-28', line('2026-08-28', '12:00:00.000') + '\n');
+    await h.session.start();
+
+    const urlCallsBefore = h.transport.urlCalls.length;
+    h.transport.errorResponse = { status: 403, body: AZURE_403 };
+    await assert.rejects(() => h.session.pollOnce());
+
+    // 스토리지가 정상으로 돌아왔다
+    h.transport.errorResponse = null;
+    h.transport.append('2026-08-28', line('2026-08-28', '12:00:30.000', 'INFO', '회복') + '\n');
+    await h.session.pollOnce();
+
+    assert.ok(h.transport.urlCalls.length > urlCallsBefore, 'URL 을 다시 받지 않았다');
+    const texts = [...h.entries().values()].map((e) => e.message);
+    assert.ok(texts.some((t) => t.includes('회복')), '회복 후 로그가 들어와야 한다');
+  });
+
+  test('오래된 URL 은 만료 전에 미리 다시 받는다', async () => {
+    const h = harness(T('2026-08-28', '00:30:00'));
+    h.transport.append('2026-08-28', line('2026-08-28', '00:30:00.000') + '\n');
+    await h.session.start();
+
+    const before = h.transport.urlCalls.length;
+    await h.session.pollOnce();
+    assert.equal(h.transport.urlCalls.length, before, '얼마 안 됐으면 다시 부르지 않는다');
+
+    // 같은 UTC 날짜 안에서 두 시간이 지났다 (롤오버는 아직 멀었다)
+    h.setNow(T('2026-08-28', '02:30:00'));
+    await h.session.pollOnce();
+    assert.ok(h.transport.urlCalls.length > before, '한 시간이 지나면 미리 받아둬야 한다');
+    assert.equal(h.session.date, '2026-08-28', '날짜가 바뀌면 안 된다');
+  });
+
+  test('URL 을 다시 받아도 읽던 자리는 그대로다', async () => {
+    const h = harness(T('2026-08-28', '00:30:00'));
+    h.transport.append('2026-08-28', line('2026-08-28', '00:30:00.000') + '\n');
+    await h.session.start();
+    const offset = h.session.byteOffset;
+
+    h.setNow(T('2026-08-28', '02:30:00'));
+    await h.session.pollOnce();
+    assert.equal(h.session.byteOffset, offset, '같은 파일의 같은 자리를 계속 읽어야 한다');
   });
 });

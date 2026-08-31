@@ -4,6 +4,17 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>AEM Cloud Log Viewer</title>
+
+    <!--
+      설치형(PWA)으로 열기 위한 것. 서비스워커는 보안 컨텍스트에서만 등록되므로
+      https 이거나 localhost 여야 한다 — 평문 HTTP 로 접근하면 그냥 웹앱으로 뜬다.
+    -->
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <meta name="theme-color" content="#1a1b1e" />
+    <link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png" />
+    <link rel="apple-touch-icon" href="/icon-192.png" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   </head>
   <body>
     <div id="root"></div>

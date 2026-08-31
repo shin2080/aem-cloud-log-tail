@@ -4,7 +4,9 @@ import type { AppContext } from '../context.js';
 import type { LogEntry, LogLevel } from '../../shared/types.js';
 import { LOG_LEVELS } from '../../shared/types.js';
 import { requireUser, fail, clientIp } from '../auth/middleware.js';
-import { authorizeEnv } from '../auth/authz.js';
+import { authorizeEnv, checkEnvAccess } from '../auth/authz.js';
+import { resolveSession } from '../auth/session.js';
+import { langFrom, msg } from '../i18n/messages.js';
 import { audit } from '../auth/audit.js';
 import { hasParser } from '../parse/parser.js';
 import { tailKeyOf, type TailEvent } from '../tail/session.js';
@@ -81,6 +83,8 @@ export function registerTailRoutes(app: FastifyInstance, ctx: AppContext): void 
     }
 
     const levels = parseLevels(q.data.levels);
+    // 헤더를 내보낸 뒤에는 요청 객체를 통해 말을 고를 수 없다. 지금 잡아둔다.
+    const lang = langFrom(req.headers['x-lang']);
     const key = {
       orgKey: grant.org.key,
       environmentId: grant.env.environmentId,
@@ -147,9 +151,30 @@ export function registerTailRoutes(app: FastifyInstance, ctx: AppContext): void 
       handle?.unsubscribe();
     };
 
-    // 프록시가 유휴 연결을 끊지 않게 한다.
+    /**
+     * 프록시가 유휴 연결을 끊지 않게 하고, 그 김에 아직 봐도 되는지 다시 확인한다.
+     *
+     * 인가는 연결할 때 한 번만 봤다. 몇 시간 열어두는 창이면 그럭저럭 넘어가지만,
+     * 모니터에 무기한 걸어두는 것이 전제가 되면 '권한 회수가 동작하지 않는다' 와 같은 말이 된다 —
+     * 관리자가 세션을 끊어도, 조직 권한을 회수해도, 계정을 꺼도
+     * 이미 열린 스트림은 계속 prod 로그를 흘린다.
+     */
     const pingTimer = setInterval(() => {
       if (closed) return;
+
+      const still = resolveSession(db, su.sessionId);
+      const stillAllowed = still ? checkEnvAccess(ctx, still, key.orgKey, key.environmentId) : null;
+      if (!stillAllowed) {
+        sse(reply, 'error', {
+          code: 'access_revoked',
+          message: msg(lang, 'access_revoked'),
+          recoverable: false,
+        });
+        cleanup();
+        reply.raw.end();
+        return;
+      }
+
       sse(reply, 'ping');
     }, PING_INTERVAL_MS);
     pingTimer.unref();

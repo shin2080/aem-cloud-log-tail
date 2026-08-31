@@ -1,0 +1,17 @@
+{
+  "name": "AEM Cloud Log Viewer",
+  "short_name": "AEM Logs",
+  "description": "AEM as a Cloud Service 로그를 실시간으로 따라가고 시간대로 조회한다",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#1a1b1e",
+  "theme_color": "#1a1b1e",
+  "lang": "ko",
+  "icons": [
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

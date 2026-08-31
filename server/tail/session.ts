@@ -3,7 +3,7 @@ import type { LogEntry } from '../../shared/types.js';
 import { createParser, type LogParser } from '../parse/parser.js';
 import { maskEntry, type Masker } from '../parse/mask.js';
 import { RingBuffer } from './buffer.js';
-import type { TailTransport } from './transport.js';
+import type { RangeRead, TailTransport } from './transport.js';
 
 export interface TailKey {
   orgKey: string;
@@ -40,6 +40,19 @@ export type TailListener = (e: TailEvent) => void;
  * 이 호출만 Cloud Manager 로 나가므로(Range 폴링은 스토리지 직행) 아껴 써야 한다.
  */
 const ROLLOVER_RETRY_MS = 60_000;
+
+/**
+ * 서명 URL 을 선제적으로 다시 받는 주기.
+ *
+ * tail URL 은 `logs?days=N` 응답 안에 서명된 채로 들어 있고 TTL 이 24시간이다
+ * (docs/findings-0b.md). 지금까지는 UTC 자정 롤오버에서만 다시 받았는데,
+ * 롤오버 간격이 최대 24시간이라 만료까지 여유가 사실상 0 이었다.
+ * Adobe 가 TTL 을 줄이거나 롤오버가 한 번 어긋나면 그날 하루 tail 이 통째로 죽는다.
+ *
+ * transport 가 자체 캐시(만료 80% 지점)를 들고 있으므로, 여기서 자주 불러도
+ * Cloud Manager 로 나가는 호출은 TTL 당 한 번뿐이다.
+ */
+const URL_REFRESH_INTERVAL_MS = 3600_000;
 
 /** epoch ms -> UTC 기준 YYYY-MM-DD. 로그 파일 이름의 날짜가 이것이다. */
 export function utcDate(ms: number): string {
@@ -85,6 +98,10 @@ export class TailSession {
   private lastDropped = 0;
   private polling = false;
   private lastRolloverAttempt = 0;
+  /** 지금 쓰는 서명 URL 을 받은 시각 */
+  private urlResolvedAt = 0;
+  /** 읽기가 오류 상태로 돌아왔다. 다음 폴링에서 URL 부터 다시 받는다 */
+  private urlStale = false;
 
   constructor(opts: TailSessionOptions) {
     this.opts = opts;
@@ -135,17 +152,14 @@ export class TailSession {
     const opened = await this.transport.resolveTail(utcDate(this.now()));
     this.currentDate = opened.date;
     this.url = opened.url;
+    this.urlResolvedAt = this.now();
 
     const size = await this.transport.sizeOf(this.url);
     const from = Math.max(0, size - this.opts.initialBytes);
     this.offset = from;
 
-    const read = await this.transport.readFrom(this.url, from);
-    if (read.status !== 416 && read.bytes.byteLength > 0) {
-      this.offset = from + read.bytes.byteLength;
-      // 파일 중간부터 읽었으므로 첫 줄은 잘려 있다. 파서가 UNKNOWN 으로 처리하고 넘어간다.
-      this.ingest(read.bytes);
-    }
+    // 파일 중간부터 읽었으므로 첫 줄은 잘려 있다. 파서가 UNKNOWN 으로 처리하고 넘어간다.
+    this.readInto(await this.transport.readFrom(this.url, from));
 
     this.timer = setInterval(() => void this.tick(), this.opts.pollIntervalMs);
     this.timer.unref();
@@ -191,12 +205,19 @@ export class TailSession {
     // 이전 파일의 서명 URL 이 죽으면 매 폴링이 여기서 터지는데, 그때 롤오버를 건너뛰면
     // 세션이 죽은 파일에 영영 붙잡힌다. 조용히 멈춘 tail 이 가장 나쁘다.
     let readError: unknown = null;
-    try {
-      const read = await this.transport.readFrom(this.url, this.offset);
-      if (read.status !== 416 && read.bytes.byteLength > 0) {
-        this.offset += read.bytes.byteLength;
-        this.ingest(read.bytes);
+
+    // 서명 URL 이 만료되기 전에 미리 바꿔 끼운다. transport 가 캐시를 들고 있어
+    // 실제로 Cloud Manager 로 나가는 것은 TTL 당 한 번뿐이다.
+    if (this.urlStale || this.now() - this.urlResolvedAt > URL_REFRESH_INTERVAL_MS) {
+      try {
+        await this.refreshUrl();
+      } catch (err) {
+        readError = err; // 날짜 검사는 아래에서 계속 돈다
       }
+    }
+
+    try {
+      this.readInto(await this.transport.readFrom(this.url, this.offset));
     } catch (err) {
       readError = err;
     }
@@ -236,11 +257,7 @@ export class TailSession {
 
     // 1. 이전 파일에 남은 꼬리를 마저 긁는다. 이걸 빼면 자정 직전 로그가 사라진다.
     try {
-      const tail = await this.transport.readFrom(this.url, this.offset);
-      if (tail.status !== 416 && tail.bytes.byteLength > 0) {
-        this.offset += tail.bytes.byteLength;
-        this.ingest(tail.bytes);
-      }
+      this.readInto(await this.transport.readFrom(this.url, this.offset));
     } catch {
       // 이전 파일 URL 이 이미 죽었을 수 있다. 새 파일로 넘어가는 게 우선이다.
     }
@@ -252,16 +269,46 @@ export class TailSession {
     this.parser = createParser(this.key.logName, this.parser.nextSeq);
     this.currentDate = opened.date;
     this.url = opened.url;
+    this.urlResolvedAt = now;
+    this.urlStale = false;
     this.offset = 0;
 
     this.emit({ type: 'rollover', newDate: opened.date });
 
     // 4. 새 파일의 처음부터 읽는다. 자정 직후라 아직 작다.
-    const read = await this.transport.readFrom(this.url, 0);
-    if (read.status !== 416 && read.bytes.byteLength > 0) {
-      this.offset = read.bytes.byteLength;
-      this.ingest(read.bytes);
+    this.readInto(await this.transport.readFrom(this.url, 0));
+  }
+
+  /**
+   * Range 응답 하나를 받아 먹인다. 오프셋은 실제로 읽은 만큼만 전진한다.
+   *
+   * **206/200 이 아니면 본문은 로그가 아니다.** 서명 URL 이 만료되면 스토리지는
+   * 403 과 함께 XML 오류 문서를 준다. 그걸 그대로 먹이면 두 가지가 한꺼번에 망가진다 —
+   * 화면에 XML 이 로그 줄처럼 뜨고, 오프셋이 오류 문서 길이만큼 앞질러서
+   * 그 뒤로는 진짜 로그를 영영 놓친다. 조용히 어긋나는 종류라 여기서 못 박는다.
+   */
+  private readInto(read: RangeRead): void {
+    if (read.status === 416) return; // 새 데이터 없음
+    if (read.status !== 206 && read.status !== 200) {
+      // 만료·회수됐을 가능성이 크다. 다음 폴링에서 URL 부터 다시 받는다.
+      this.urlStale = true;
+      throw new Error(`로그 스토리지가 ${read.status} 를 줬다 (서명 URL 만료일 수 있다)`);
     }
+    if (read.bytes.byteLength === 0) return;
+    this.offset += read.bytes.byteLength;
+    this.ingest(read.bytes);
+  }
+
+  /**
+   * 서명 URL 을 다시 받는다. 같은 날짜면 URL 만 갈아끼우고 오프셋은 그대로 둔다 —
+   * 같은 파일의 같은 자리를 계속 읽는 것이라 위치가 달라질 이유가 없다.
+   */
+  private async refreshUrl(): Promise<void> {
+    this.urlResolvedAt = this.now(); // 실패해도 매 폴링마다 다시 부르지 않는다
+    const opened = await this.transport.resolveTail(this.currentDate);
+    if (opened.date !== this.currentDate) return; // 롤오버가 처리할 일이다
+    this.url = opened.url;
+    this.urlStale = false;
   }
 
   /** 파싱 -> 마스킹 -> 버퍼. 마스킹은 버퍼에 들어가기 전에 끝난다. */

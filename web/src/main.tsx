@@ -13,6 +13,7 @@ import { Notifications } from '@mantine/notifications';
 import { BrowserRouter } from 'react-router-dom';
 import { theme } from './theme';
 import { App } from './App';
+import { registerServiceWorker } from './pwa';
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
@@ -24,3 +25,5 @@ createRoot(document.getElementById('root')!).render(
     </MantineProvider>
   </StrictMode>,
 );
+
+registerServiceWorker();

@@ -93,7 +93,14 @@ async function main(): Promise<void> {
   // (wildcard:false 는 부팅 때 파일 목록으로 라우트를 만들어, 다시 빌드하면 404 가 된다)
   const staticRoot = findWebRoot() ?? candidates[1]!;
   mkdirSync(staticRoot, { recursive: true });
-  await app.register(fastifyStatic, { root: staticRoot });
+  await app.register(fastifyStatic, {
+    root: staticRoot,
+    setHeaders: (reply, path) => {
+      // 서비스워커는 브라우저가 늘 새로 확인해야 한다. 이걸 캐시하면
+      // 모니터에 걸어둔 화면이 몇 주 전 워커를 붙들고 새 배포를 영영 못 받는다.
+      if (path.endsWith('/sw.js')) reply.header('Cache-Control', 'no-cache');
+    },
+  });
 
   if (!findWebRoot()) {
     console.log('[web] 빌드된 프론트가 없다. `npm run build:web` 을 돌린다 (서버는 다시 띄우지 않아도 된다).');
@@ -160,6 +167,15 @@ function warnIfExposed(cfg: ReturnType<typeof loadConfigOrExit>): void {
   console.log('    이 서버는 TLS 를 직접 하지 않는다. 암호화가 필요하면 앞단에 두거나');
   console.log('    Tailscale 처럼 네트워크 계층에서 암호화되는 경로로만 접근한다.');
   for (const m of missing) console.log(`    · ${m}`);
+
+  // 설치형(PWA)으로 쓰려면 여기서 한 번 더 걸린다. 나중에 "왜 설치가 안 되지" 로
+  // 헤매는 것보다 부팅 때 말해주는 편이 낫다.
+  if (!cfg.SESSION_COOKIE_SECURE) {
+    console.log('');
+    console.log('    설치형(PWA)으로 열려면 https 가 필요하다 — 서비스워커는 보안 컨텍스트에서만 돈다.');
+    console.log('    (localhost 는 예외라 이 기기에서는 평문으로도 설치된다)');
+    console.log('    Tailscale 이면 `tailscale cert` + `tailscale serve` 로 https 를 붙일 수 있다.');
+  }
 }
 
 main().catch((err) => {

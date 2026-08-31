@@ -374,6 +374,71 @@ TRUST_PROXY=true
 
 ---
 
+## 모니터에 띄워두고 쓰기 (PWA)
+
+설치형 앱으로 열어 상시 모니터에 걸어두는 쓰임을 염두에 두고 만들었다.
+Chrome 주소창의 설치 아이콘, 또는 ⋮ → "앱 설치" 로 창 장식 없이 띄운다.
+
+**https 가 필요하다.** 서비스워커는 보안 컨텍스트에서만 돌기 때문에
+`localhost` 가 아니면 평문 HTTP 로는 설치되지 않는다 (기능은 그대로 동작하고,
+설치형으로만 안 열린다). Tailscale 이면 이렇게 붙인다:
+
+```bash
+tailscale cert $(tailscale status --json | jq -r .Self.DNSName | sed 's/\.$//')
+```
+
+그리고 `SESSION_COOKIE_SECURE=true` 로 바꾼다.
+
+### 캐시에 무엇이 남는가
+
+서비스워커([`web/public/sw.js`](web/public/sw.js))가 캐시에 넣는 것은 **앱 껍데기뿐이다** —
+HTML 과 해시가 박힌 JS/CSS. `/api/*` 는 아예 가로채지 않는다.
+
+이건 편의가 아니라 이 도구의 전제를 지키는 문제다. 로그 본문은 메모리에만 두기로
+했는데, 서비스워커가 API 응답을 캐시하면 고객사 prod 로그가 평문으로 디스크에 남고,
+로그아웃해도 안 지워지고, 같은 기기의 다음 사람이 앞사람 캐시를 읽는다.
+Workbox 의 흔한 `runtimeCaching` 레시피가 정확히 그 일을 하기 때문에 직접 썼다.
+로그아웃하면 남은 껍데기 캐시까지 비운다.
+
+### 상시로 켜두면 달라지는 것들
+
+| | 기본값 | 왜 |
+|---|---|---|
+| `SESSION_TTL_HOURS` | 12 | **유휴** 기준이다. 화면이 10분마다 서버를 두드려 계속 연장한다 |
+| `SESSION_MAX_HOURS` | 168 | 연장의 천장. 이 주기로는 사람이 가서 다시 로그인해야 한다 |
+| `TAIL_BUFFER_MAX_LINES` | 20000 | **세션당** 이다. 창 넷이면 넷 다 이만큼 쥔다 |
+| `TAIL_BUFFER_MAX_BYTES` | 32MB | 위와 같다. 24시간 켜두면 이게 상시 점유 메모리다 |
+
+무기한 로그인을 만들고 싶으면 `SESSION_MAX_HOURS` 를 올리는 대신,
+**키오스크 전용 계정**을 따로 발급하고 prod 열람 권한을 주지 않는 편이 낫다.
+상시 로그인된 브라우저는 그대로 상시 유효한 자격증명이다.
+
+### 알아서 버티는 것들
+
+- 서버가 재시작하거나 세션이 유휴 정리되면 로그의 seq 가 0부터 다시 시작한다.
+  화면은 세대(generation)가 바뀐 것을 보고 쌓아둔 것을 버리고 다시 채운다 —
+  이걸 안 하면 "연결됨" 인 채로 새 로그만 조용히 안 들어온다
+- 화면이 렌더 중에 터지면 무엇이 났는지 보여주고 스스로 새로고침한다
+  (되풀이되면 기다리는 시간을 늘린다)
+- 새 배포가 올라오면 서비스워커가 알아채고 한 번 새로고침한다.
+  보고 있던 창은 URL 에 들어 있어 그대로 돌아온다
+- 서명 URL 이 만료되기 전에 미리 다시 받는다. 만료된 URL 로 받은 오류 응답을
+  로그로 착각해 먹지 않는다
+- 열려 있는 스트림도 15초마다 권한을 다시 본다. 계정을 끄거나 조직 권한을
+  회수하면 이미 열린 창도 끊긴다
+
+### 남는 것
+
+화면 앞을 지나가는 사람 전부가 관객이다. 마스킹은 IP·이메일·주민번호·카드번호·
+Bearer 토큰을 잡지만 한국 휴대폰 번호, 한글 이름·주소, 접두어 없는 JWT,
+고객사 고유 식별자는 규칙이 없다. 상시로 띄울 거면 그 로그에 맞춰
+[`server/parse/mask.ts`](server/parse/mask.ts) 의 규칙을 한 번 더 채운다.
+
+서버는 표시용 기기에서 돌리지 않는 편이 낫다 — `.env` 에 모든 조직의
+client secret 이 평문으로 있다.
+
+---
+
 ## 문제가 생기면
 
 **로그인 화면에서 "이메일 또는 비밀번호가 올바르지 않다"**
@@ -436,11 +501,13 @@ server/
   db/                    Drizzle 스키마 · 손으로 쓴 마이그레이션
   auth/                  비밀번호(argon2id) · 세션 · 레이트 리밋 · 감사 기록 · 가드
   auth/adminops.ts       계정 조작 + 잠금 방지 가드
+  auth/session.ts        세션 발급·해석 + 슬라이딩 연장 (천장은 SESSION_MAX_HOURS)
   adobe/ims.ts           IMS 토큰 발급·캐시 (조직 단위로 격리)
   adobe/cloudmanager.ts  읽기 전용 API 클라이언트. 302 Location 을 직접 읽는다
   adobe/envcache.ts      환경 목록 캐시 + 자격증명 지문
   parse/                 로그 7종 파서 · 마스킹
-  tail/session.ts        폴링 루프 + 링버퍼 + UTC 롤오버
+  tail/session.ts        폴링 루프 + 링버퍼 + UTC 롤오버 + 서명 URL 선제 갱신
+  tail/buffer.ts         링버퍼. 줄 수·바이트 두 상한, 여유를 두고 한 번에 축출
   tail/registry.ts       세션 ref-count · 유휴 정리
   search/range.ts        조회 구간 → UTC 날짜 파일 (KST 새벽은 전날 파일이다)
   search/scan.ts         .gz 스트리밍 스캔. 전체를 메모리에 올리지 않는다
@@ -451,12 +518,19 @@ web/src/
   components/LogViewer.tsx   가상 스크롤 + 자동 추적
   components/LogLine.tsx     레벨 배지 · 스택 접힘 · 하이라이트
   components/TailPane.tsx    창 하나 = 스트림 하나
+  components/ErrorBoundary.tsx  화면이 터지면 보여주고 스스로 새로고침
+  lib/logbuffer.ts           화면 쪽 상한 (줄 수 + 크기). 서버 링버퍼의 짝
+  pwa.ts                     서비스워커 등록 · 새 배포 감지
   components/SearchPane.tsx  창 하나 = 조회 잡 하나
   i18n/strings.ts            화면 문자열 (ko/en)
   api/                       SSE 구독 · REST
   pages/
+web/public/
+  sw.js                      서비스워커. 껍데기만 캐시하고 /api 는 손대지 않는다
+  manifest.webmanifest       설치형 앱 정의
 shared/types.ts              서버·클라이언트 공용 타입
 scripts/phase0-probe.ts      실환경 프로브
+scripts/make-icons.ts        PWA 아이콘 생성 (`npm run icons`)
 ```
 
 ### 문자열을 고칠 때

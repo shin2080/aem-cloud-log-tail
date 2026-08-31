@@ -4,6 +4,7 @@ import { Navigate, Route, Routes } from 'react-router-dom';
 import { SessionProvider, useSession } from './api/session';
 import { LangProvider, useT } from './i18n';
 import { ErrorBoundary, noteHealthy } from './components/ErrorBoundary';
+import { purgeServiceWorkerCaches } from './pwa';
 import { LangToggle } from './components/LangToggle';
 import { api } from './api/client';
 import { LoginPage } from './pages/LoginPage';
@@ -40,6 +41,9 @@ function Shell() {
 
   const logout = async () => {
     await api.logout();
+    // 껍데기 캐시에 비밀이 있지는 않다. 다만 '나가면 아무것도 안 남는다' 는
+    // 이 도구의 약속이라, 지킬 수 있는 곳에서는 기계적으로 지킨다.
+    purgeServiceWorkerCaches();
     setMe(null);
   };
 
