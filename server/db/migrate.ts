@@ -97,6 +97,49 @@ const MIGRATIONS: Migration[] = [
       ALTER TABLE env_cache ADD COLUMN credential_id TEXT;
     `,
   },
+  {
+    id: '0004_alerts',
+    sql: /* sql */ `
+      -- 알림 규칙과 그 결과.
+      -- alert_hits 에 로그 본문은 넣지 않는다 — seq 로 원문 자리를 가리킬 뿐이다.
+      CREATE TABLE alert_rules (
+        id              TEXT PRIMARY KEY,
+        user_id         TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        name            TEXT NOT NULL,
+        org_key         TEXT NOT NULL,
+        environment_id  TEXT NOT NULL,
+        service         TEXT NOT NULL,
+        log_name        TEXT NOT NULL,
+        pattern         TEXT NOT NULL,
+        is_regex        INTEGER NOT NULL DEFAULT 0,
+        levels          TEXT,
+        cooldown_sec    INTEGER NOT NULL DEFAULT 300,
+        enabled         INTEGER NOT NULL DEFAULT 1,
+        disabled_reason TEXT,
+        created_at      INTEGER NOT NULL
+      );
+      CREATE INDEX idx_alert_rules_user ON alert_rules(user_id);
+      CREATE INDEX idx_alert_rules_target ON alert_rules(org_key, environment_id, service, log_name);
+      CREATE INDEX idx_alert_rules_enabled ON alert_rules(enabled);
+
+      CREATE TABLE alert_hits (
+        id         TEXT PRIMARY KEY,
+        rule_id    TEXT NOT NULL REFERENCES alert_rules(id) ON DELETE CASCADE,
+        signature  TEXT NOT NULL,
+        first_ts   INTEGER NOT NULL,
+        last_ts    INTEGER NOT NULL,
+        count      INTEGER NOT NULL DEFAULT 1,
+        first_seq  INTEGER NOT NULL,
+        last_seq   INTEGER NOT NULL,
+        level      TEXT NOT NULL,
+        read_at    INTEGER,
+        created_at INTEGER NOT NULL
+      );
+      CREATE INDEX idx_alert_hits_rule ON alert_hits(rule_id);
+      CREATE INDEX idx_alert_hits_created ON alert_hits(created_at);
+      CREATE INDEX idx_alert_hits_unread ON alert_hits(read_at);
+    `,
+  },
 ];
 
 export function runMigrations(db: Database.Database): string[] {

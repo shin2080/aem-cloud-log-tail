@@ -9,6 +9,7 @@ import { ExportDialog, type ExportTarget } from './ExportDialog';
 import { Sparkline } from './Sparkline';
 import { SavedFilters, type FilterPayload } from './SavedFilters';
 import { useLogView } from './useLogView';
+import { useNavigate } from 'react-router-dom';
 import { useThrottled } from '../lib/useThrottled';
 import { ENV_COLOR } from '../theme';
 import { useT, type StringKey, type TFunction } from '../i18n';
@@ -62,6 +63,7 @@ export function TailPane({
   closable: boolean;
 }) {
   const t = useT();
+  const navigate = useNavigate();
   const [levels, setLevels] = useState<LogLevel[]>(['ERROR', 'WARN']); // 기본은 WARN+
   const [query, setQuery] = useState('');
   const [useRegex, setUseRegex] = useState(false);
@@ -278,6 +280,22 @@ export function TailPane({
                   {view.showChart ? t('common.on') : t('common.off')}
                 </Text>
               </Group>
+            </Menu.Item>
+            <Menu.Divider />
+            {/*
+              지금 보고 있는 조건을 그대로 규칙으로 넘긴다. 대상·검색어·레벨이
+              이미 손에 있는데 규칙 화면에서 다시 고르게 하면 같은 UI 가 둘이 된다.
+            */}
+            <Menu.Item
+              onClick={() => {
+                const q = new URLSearchParams({ p: paneKey(target) });
+                if (query.trim()) q.set('q', query.trim());
+                if (useRegex) q.set('re', '1');
+                if (levels.length > 0) q.set('levels', levels.join(','));
+                navigate(`/alerts?${q.toString()}`);
+              }}
+            >
+              <Text size="sm">{t('rules.fromPane')}</Text>
             </Menu.Item>
             <Menu.Divider />
             <Box px="sm" pb="xs">

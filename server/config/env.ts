@@ -93,6 +93,15 @@ const serverSchema = z.object({
   EXPORT_MAX_BYTES: int(524288000, 1024),
   MASKING_ENABLED: bool(true),
   /**
+   * 알림 규칙이 감시할 수 있는 대상(환경×서비스×로그) 수.
+   *
+   * 대상 하나가 곧 '아무도 안 봐도 도는 폴링 루프 + 링버퍼' 다.
+   * 이 값 × TAIL_BUFFER_MAX_BYTES 가 알림 때문에 상시 점유되는 메모리다.
+   */
+  ALERT_MAX_TARGETS: int(3, 0),
+  /** 알림 기록 보존. 감사 기록과 같은 이유로 무한히 쌓게 두지 않는다 */
+  ALERT_HIT_RETENTION_DAYS: int(30, 0),
+  /**
    * 감사 기록 보존 기간. 0이면 영구 보관한다.
    *
    * 삭제 API 를 안 만드는 것과 무한히 쌓이게 두는 것은 다른 문제다.

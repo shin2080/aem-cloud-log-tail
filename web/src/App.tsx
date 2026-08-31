@@ -14,6 +14,8 @@ import { TailPage } from './pages/TailPage';
 import { SearchPage } from './pages/SearchPage';
 import { AdminUsersPage } from './pages/AdminUsersPage';
 import { AdminAuditPage } from './pages/AdminAuditPage';
+import { AlertRulesPage } from './pages/AlertRulesPage';
+import { AlertBell } from './components/AlertBell';
 
 function Shell() {
   const { me, loading, setMe } = useSession();
@@ -56,7 +58,9 @@ function Shell() {
               AEM Cloud Log Viewer
             </Text>
           </Group>
-          <Menu position="bottom-end">
+          <Group gap={4}>
+            <AlertBell />
+            <Menu position="bottom-end">
             <Menu.Target>
               <Button variant="subtle" size="compact-sm" color="gray">
                 {me.displayName}
@@ -86,7 +90,8 @@ function Shell() {
                 <LangToggle />
               </Box>
             </Menu.Dropdown>
-          </Menu>
+            </Menu>
+          </Group>
         </Group>
       </AppShell.Header>
 
@@ -108,6 +113,7 @@ function Shell() {
               <Route path="/search" element={<SearchPage />} />
               {me.role === 'admin' && <Route path="/admin/users" element={<AdminUsersPage />} />}
               {me.role === 'admin' && <Route path="/admin/audit" element={<AdminAuditPage />} />}
+              <Route path="/alerts" element={<AlertRulesPage />} />
               <Route path="/password" element={<ChangePasswordPage forced={false} />} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>

@@ -12,6 +12,8 @@ export type AuditAction =
   | 'search'
   | 'export'
   | 'env_refresh'
+  // 규칙 등록은 "아무도 안 볼 때도 이 로그를 계속 읽겠다" 는 선언이라 남긴다.
+  | 'alert_rule_created'
   | 'admin_user_create'
   | 'admin_user_update'
   | 'admin_user_delete'

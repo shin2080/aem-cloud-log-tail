@@ -19,6 +19,8 @@ import { registerSearchRoutes } from './routes/search.js';
 import { registerExportRoutes } from './routes/export.js';
 import { registerAdminRoutes } from './routes/admin.js';
 import { registerFilterRoutes } from './routes/filters.js';
+import { registerAlertRoutes } from './routes/alerts.js';
+import { purgeOldHits } from './alerts/watch.js';
 
 const SESSION_PURGE_INTERVAL_MS = 3600_000;
 const AUDIT_PURGE_INTERVAL_MS = 24 * 3600_000;
@@ -64,6 +66,7 @@ async function main(): Promise<void> {
   registerExportRoutes(app, ctx);
   registerAdminRoutes(app, ctx);
   registerFilterRoutes(app, ctx);
+  registerAlertRoutes(app, ctx);
 
   app.get('/api/health', async () => ({ ok: true }));
 
@@ -129,6 +132,7 @@ async function main(): Promise<void> {
 
   const close = async (signal: string): Promise<void> => {
     console.log(`\n[${signal}] 종료한다`);
+    ctx.alerts.stop();   // 감시 구독을 놓아야 tail 세션이 정리된다
     ctx.tails.stopAll(); // 폴링 루프를 멈추고 링버퍼를 비운다
     ctx.searches.stopAll();
     await app.close();
@@ -138,6 +142,14 @@ async function main(): Promise<void> {
   process.on('SIGINT', () => void close('SIGINT'));
   process.on('SIGTERM', () => void close('SIGTERM'));
 
+  // 규칙이 걸린 대상을 잡는다. 여기서 실패해도 서버는 떠야 한다 —
+  // Cloud Manager 가 잠깐 죽었다고 로그 뷰어 전체가 안 뜨면 곤란하다.
+  const purgedHits = purgeOldHits(handle.db, cfg.ALERT_HIT_RETENTION_DAYS);
+  if (purgedHits > 0) console.log(`[alerts] 보존 기간이 지난 알림 ${purgedHits}건 정리`);
+  await ctx.alerts.start().catch((err: unknown) => {
+    console.error('[alerts] 감시를 시작하지 못했다:', err instanceof Error ? err.message : err);
+  });
+
   await app.listen({ port: cfg.PORT, host: cfg.HOST });
   console.log(`\n  AEM Cloud Log Viewer → http://${cfg.HOST}:${cfg.PORT}`);
   console.log(`  조직 ${cfg.orgs.size}개 로드: ${[...cfg.orgs.keys()].join(', ')}`);
@@ -145,6 +157,12 @@ async function main(): Promise<void> {
     `  감사 기록 ${auditRowCount(handle.db).toLocaleString()}건 ` +
       `(보존 ${cfg.AUDIT_RETENTION_DAYS === 0 ? '영구' : `${cfg.AUDIT_RETENTION_DAYS}일`})`,
   );
+  if (cfg.ALERT_MAX_TARGETS > 0) {
+    console.log(
+      `  알림 감시 ${ctx.alerts.watchedCount}/${cfg.ALERT_MAX_TARGETS} 대상` +
+        (ctx.alerts.watchedCount > 0 ? ` — 아무도 안 봐도 폴링이 돈다` : ''),
+    );
+  }
   warnIfExposed(cfg);
   console.log('');
 }

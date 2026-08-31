@@ -1,6 +1,7 @@
 import type { Me, ApiError, EnvironmentSummary, AvailableService, SearchRequest, ExportRequest } from '@shared/types';
 import type { AdminUser } from '../pages/AdminUsersPage';
 import type { AuditRow } from '../pages/AdminAuditPage';
+import type { AlertHit, AlertRule, CreateRuleInput } from './alerts';
 import { currentLang, tStatic } from '../i18n';
 
 export class ApiRequestError extends Error {
@@ -123,6 +124,31 @@ export const api = {
     for (const [k, v] of Object.entries(q)) if (v !== undefined && v !== '') p.set(k, String(v));
     return request<{ rows: AuditRow[]; total: number; actions: string[] }>(`/api/admin/audit?${p.toString()}`);
   },
+
+  /* ── 알림 ───────────────────────────────────────────── */
+
+  alertRules: () =>
+    request<{ rules: AlertRule[]; maxTargets: number; watchedTargets: string[] }>('/api/alerts/rules'),
+
+  createAlertRule: (input: CreateRuleInput) =>
+    request<{ rule: AlertRule }>('/api/alerts/rules', { method: 'POST', body: JSON.stringify(input) }),
+
+  setAlertRuleEnabled: (id: string, enabled: boolean) =>
+    request<{ rule: AlertRule }>(`/api/alerts/rules/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ enabled }),
+    }),
+
+  deleteAlertRule: (id: string) =>
+    request<{ ok: true }>(`/api/alerts/rules/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+
+  alertHits: (limit = 50) => request<{ hits: AlertHit[]; unread: number }>(`/api/alerts/hits?limit=${limit}`),
+
+  markAlertsRead: (ids?: string[]) =>
+    request<{ unread: number }>('/api/alerts/hits/read', {
+      method: 'POST',
+      body: JSON.stringify(ids ? { ids } : {}),
+    }),
 
   /* ── 저장된 필터 ────────────────────────────────────── */
 
