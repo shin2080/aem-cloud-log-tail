@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { LogEntry } from '@shared/types';
 import { collapsedCount, groupEntries, type GroupedEntry } from '../lib/grouping';
 import { useThrottled } from '../lib/useThrottled';
@@ -102,26 +102,31 @@ export function useLogView(entries: LogEntry[], scope = 'default'): LogViewState
     saveBookmarks(scope, bookmarks, pinned);
   }, [scope, bookmarks, pinned]);
 
-  const toggleBookmark = useCallback(
-    (seq: number) => {
-      setBookmarks((prev) => {
-        const next = new Set(prev);
-        if (next.has(seq)) next.delete(seq);
-        else next.add(seq);
-        return next;
-      });
-      setPinned((prev) => {
-        const next = new Map(prev);
-        if (next.has(seq)) next.delete(seq);
-        else {
-          const e = entries.find((x) => x.seq === seq);
-          if (e) next.set(seq, e);
-        }
-        return next;
-      });
-    },
-    [entries],
-  );
+  /**
+   * 북마크 토글이 `entries` 에 의존하면 SSE 배치마다 함수가 새로 만들어진다.
+   * 그 함수는 모든 LogLine 의 prop 이라, memo 를 걸어둔 게 매번 깨지고
+   * 보이는 줄 전부가 다시 그려진다. 최신 목록은 ref 로 본다.
+   */
+  const entriesRef = useRef(entries);
+  entriesRef.current = entries;
+
+  const toggleBookmark = useCallback((seq: number) => {
+    setBookmarks((prev) => {
+      const next = new Set(prev);
+      if (next.has(seq)) next.delete(seq);
+      else next.add(seq);
+      return next;
+    });
+    setPinned((prev) => {
+      const next = new Map(prev);
+      if (next.has(seq)) next.delete(seq);
+      else {
+        const e = entriesRef.current.find((x) => x.seq === seq);
+        if (e) next.set(seq, e);
+      }
+      return next;
+    });
+  }, []);
 
   /**
    * 묶기는 5만 엔트리에서 한 번에 40ms 남짓 걸린다. 배치마다 다시 하면 화면이 멈춘다.

@@ -8,6 +8,15 @@
 export interface MaskRule {
   name: string;
   apply(text: string): string;
+  /**
+   * 이 줄에 규칙이 걸릴 여지가 있는가. 없으면 정규식을 아예 안 돌린다.
+   *
+   * 실측(200,000줄)으로 전체 459ms 중 email 규칙 혼자 223ms 였다.
+   * 로그 대부분에는 `@` 가 없으므로 indexOf 한 번으로 절반이 사라진다.
+   * **반드시 정규식이 매칭될 수 있는 조건의 상위집합이어야 한다** —
+   * 여기서 잘못 걸러내면 가려져야 할 것이 조용히 통과한다.
+   */
+  when?(text: string): boolean;
 }
 
 /* ── 오탐 방지 헬퍼 ──────────────────────────────────────
@@ -129,10 +138,12 @@ export const DEFAULT_RULES: MaskRule[] = [
   },
   {
     name: 'bearer',
+    when: (t) => t.includes('Bearer'),
     apply: (t) => t.replace(/Bearer\s+[A-Za-z0-9._\-]{20,}/g, 'Bearer ***'),
   },
   {
     name: 'basic',
+    when: (t) => t.includes('Basic'),
     apply: (t) => t.replace(/Basic\s+[A-Za-z0-9+/=]{16,}/g, 'Basic ***'),
   },
   {
@@ -144,6 +155,7 @@ export const DEFAULT_RULES: MaskRule[] = [
   {
     // 도메인은 남긴다 — 어느 조직에서 온 주소인지는 디버깅에 필요하다.
     name: 'email',
+    when: (t) => t.includes('@'),
     apply: (t) =>
       t.replace(/\b([A-Za-z0-9._%+-])[A-Za-z0-9._%+-]*(@[A-Za-z0-9.-]+\.[A-Za-z]{2,})/g, '$1***$2'),
   },
@@ -225,7 +237,10 @@ export class Masker {
   mask(text: string): [string, boolean] {
     if (!this.enabled || text.length === 0) return [text, false];
     let out = text;
-    for (const r of this.rules) out = r.apply(out);
+    for (const r of this.rules) {
+      if (r.when && !r.when(out)) continue;
+      out = r.apply(out);
+    }
     return [out, out !== text];
   }
 }

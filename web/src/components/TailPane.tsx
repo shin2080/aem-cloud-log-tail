@@ -9,6 +9,7 @@ import { ExportDialog, type ExportTarget } from './ExportDialog';
 import { Sparkline } from './Sparkline';
 import { SavedFilters, type FilterPayload } from './SavedFilters';
 import { useLogView } from './useLogView';
+import { useThrottled } from '../lib/useThrottled';
 import { ENV_COLOR } from '../theme';
 import { useT, type StringKey, type TFunction } from '../i18n';
 
@@ -94,9 +95,17 @@ export function TailPane({
 
   const regexInvalid = useRegex && query.trim().length > 0 && highlight === null;
 
+  /**
+   * 거르기는 버퍼 전체에 정규식을 돌린다. SSE 배치마다(초당 10회) 다시 하면
+   * 창 넷을 열었을 때 메인 스레드가 그것만 한다. 묶기·분포와 같은 이유로 흘려보낸다 —
+   * 애초에 로그 자체가 2분 밀려 있어서 300ms 늦는 것은 티가 안 난다.
+   * 검색어가 없으면 거를 것도 없으므로 지연 없이 그대로 쓴다.
+   */
+  const filterInput = useThrottled(tail.entries, 300, highlight !== null);
+
   const visible = useMemo(() => {
     if (!highlight) return tail.entries;
-    return tail.entries.filter((e) => {
+    return filterInput.filter((e) => {
       highlight.lastIndex = 0;
       if (highlight.test(e.raw)) return true;
       return e.continuation.some((c) => {
@@ -104,7 +113,7 @@ export function TailPane({
         return highlight.test(c);
       });
     });
-  }, [tail.entries, highlight]);
+  }, [tail.entries, filterInput, highlight]);
 
   const view = useLogView(visible, paneKey(target));
 

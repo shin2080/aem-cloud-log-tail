@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { LogEntry, LogLevel } from '@shared/types';
+import { EMPTY, upsertAll, type Buffered } from '../lib/logbuffer';
 
 export interface TailParams {
   org: string;
@@ -23,50 +24,11 @@ export interface TailState {
   pendingCount: number;
 }
 
-/** 브라우저 쪽 상한. 서버 링버퍼와 같은 규모로 둔다. */
-const CLIENT_MAX_ENTRIES = 50_000;
-
-/**
- * seq 로 upsert 한다.
- * 스택트레이스가 뒤늦게 오면 서버가 같은 seq 를 다시 보낸다 — 갈아끼워야 한다.
- */
-function upsertAll(current: LogEntry[], incoming: LogEntry[]): LogEntry[] {
-  if (incoming.length === 0) return current;
-  const next = current.slice();
-
-  for (const e of incoming) {
-    const last = next[next.length - 1];
-    if (!last || e.seq > last.seq) {
-      next.push(e);
-      continue;
-    }
-    if (e.seq === last.seq) {
-      next[next.length - 1] = e;
-      continue;
-    }
-    // 드문 경우: 이전 엔트리의 개정. 이분 탐색으로 찾는다.
-    let lo = 0;
-    let hi = next.length - 1;
-    while (lo <= hi) {
-      const mid = (lo + hi) >> 1;
-      const s = next[mid]!.seq;
-      if (s === e.seq) {
-        next[mid] = e;
-        break;
-      }
-      if (s < e.seq) lo = mid + 1;
-      else hi = mid - 1;
-    }
-  }
-
-  return next.length > CLIENT_MAX_ENTRIES ? next.slice(next.length - CLIENT_MAX_ENTRIES) : next;
-}
-
 export function useTailStream(params: TailParams | null): TailState & {
   setPaused: (p: boolean) => void;
   clear: () => void;
 } {
-  const [entries, setEntries] = useState<LogEntry[]>([]);
+  const [buffered, setBuffered] = useState<Buffered>(EMPTY);
   const [status, setStatus] = useState<TailStatus>('closed');
   const [error, setError] = useState<string | null>(null);
   const [droppedCount, setDroppedCount] = useState(0);
@@ -75,7 +37,7 @@ export function useTailStream(params: TailParams | null): TailState & {
   const [pendingCount, setPendingCount] = useState(0);
 
   // 일시정지 중에는 여기에 쌓아두고 화면은 건드리지 않는다. 서버 폴링은 계속 돈다.
-  const parked = useRef<LogEntry[]>([]);
+  const parked = useRef<Buffered>(EMPTY);
   const pausedRef = useRef(false);
 
   /**
@@ -105,19 +67,19 @@ export function useTailStream(params: TailParams | null): TailState & {
   const setPaused = useCallback((p: boolean) => {
     pausedRef.current = p;
     setPausedState(p);
-    if (!p && parked.current.length > 0) {
-      const flush = parked.current;
-      parked.current = [];
+    if (!p && parked.current.entries.length > 0) {
+      const flush = parked.current.entries;
+      parked.current = EMPTY;
       setPendingCount(0);
-      setEntries((cur) => upsertAll(cur, flush));
+      setBuffered((cur) => upsertAll(cur, flush));
     }
   }, []);
 
   const clear = useCallback(() => {
-    parked.current = [];
+    parked.current = EMPTY;
     newestSeq.current = -1;
     setPendingCount(0);
-    setEntries([]);
+    setBuffered(EMPTY);
     setDroppedCount(0);
   }, []);
 
@@ -127,11 +89,11 @@ export function useTailStream(params: TailParams | null): TailState & {
       return;
     }
 
-    setEntries([]);
+    setBuffered(EMPTY);
     setError(null);
     setDroppedCount(0);
     setRolloverDate(null);
-    parked.current = [];
+    parked.current = EMPTY;
     generation.current = null;
     newestSeq.current = -1;
     setPendingCount(0);
@@ -139,11 +101,11 @@ export function useTailStream(params: TailParams | null): TailState & {
 
     /** 서버 세션이 새로 만들어졌다. 쌓아둔 것은 이제 다른 세계의 seq 다. */
     const resetForNewSession = (): void => {
-      parked.current = [];
+      parked.current = EMPTY;
       newestSeq.current = -1;
       setPendingCount(0);
       setDroppedCount(0);
-      setEntries([]);
+      setBuffered(EMPTY);
     };
 
     // 세션 쿠키가 자동으로 실린다. WebSocket 대신 SSE 를 쓰는 이유다.
@@ -178,10 +140,10 @@ export function useTailStream(params: TailParams | null): TailState & {
 
       if (pausedRef.current) {
         parked.current = upsertAll(parked.current, batch);
-        setPendingCount(parked.current.length);
+        setPendingCount(parked.current.entries.length);
         return;
       }
-      setEntries((cur) => upsertAll(cur, batch));
+      setBuffered((cur) => upsertAll(cur, batch));
     });
 
     es.addEventListener('rollover', (ev) => {
@@ -216,5 +178,15 @@ export function useTailStream(params: TailParams | null): TailState & {
     };
   }, [url]);
 
-  return { entries, status, error, droppedCount, rolloverDate, paused, pendingCount, setPaused, clear };
+  return {
+    entries: buffered.entries,
+    status,
+    error,
+    droppedCount,
+    rolloverDate,
+    paused,
+    pendingCount,
+    setPaused,
+    clear,
+  };
 }

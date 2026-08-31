@@ -10,10 +10,26 @@ export class RingBuffer {
   private bytes = 0;
   private dropped = 0;
 
+  /**
+   * 넘칠 때 상한보다 이만큼 더 버린다.
+   *
+   * 상한에 딱 맞춰 자르면 그 뒤로는 새 줄이 올 때마다 배열 앞을 한 칸씩 밀게 된다.
+   * 24시간 켜두는 도구에서는 '버퍼가 꽉 찬 상태' 가 예외가 아니라 정상 상태라,
+   * 그 한 칸이 곧 5만 원소 memmove × 초당 수백 번이 된다.
+   * 여유를 두고 한 번에 잘라 그 사이에는 아예 자르지 않는다.
+   *
+   * 작게 잡은 설정(테스트 등)에서는 0 이 되어 예전처럼 정확히 상한을 지킨다.
+   */
+  private readonly lineSlack: number;
+  private readonly byteSlack: number;
+
   constructor(
     private readonly maxLines: number,
     private readonly maxBytes: number,
-  ) {}
+  ) {
+    this.lineSlack = Math.floor(maxLines * 0.02);
+    this.byteSlack = Math.floor(maxBytes * 0.02);
+  }
 
   get size(): number {
     return this.entries.length;
@@ -95,13 +111,25 @@ export class RingBuffer {
     return -1;
   }
 
+  /** 몇 개를 버릴지 먼저 세고 한 번에 자른다. shift 를 반복하면 그때마다 배열 전체가 밀린다. */
   private evict(): void {
-    while (this.entries.length > this.maxLines || (this.bytes > this.maxBytes && this.entries.length > 1)) {
-      const gone = this.entries.shift();
-      if (!gone) break;
-      this.bytes -= sizeOf(gone);
-      this.dropped++;
+    if (this.entries.length <= this.maxLines && this.bytes <= this.maxBytes) return;
+
+    const lineTarget = Math.max(1, this.maxLines - this.lineSlack);
+    const byteTarget = Math.max(0, this.maxBytes - this.byteSlack);
+
+    const total = this.entries.length;
+    let drop = 0;
+    let bytes = this.bytes;
+    while (total - drop > lineTarget || (bytes > byteTarget && total - drop > 1)) {
+      bytes -= sizeOf(this.entries[drop]!);
+      drop++;
     }
+    if (drop === 0) return;
+
+    this.entries.splice(0, drop);
+    this.bytes = bytes;
+    this.dropped += drop;
   }
 }
 

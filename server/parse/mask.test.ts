@@ -1,7 +1,7 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import type { LogEntry } from '../../shared/types.js';
-import { Masker, maskEntry } from './mask.js';
+import { DEFAULT_RULES, Masker, maskEntry } from './mask.js';
 
 const m = new Masker(true);
 const mask = (s: string): string => m.mask(s)[0];

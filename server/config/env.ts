@@ -79,8 +79,15 @@ const serverSchema = z.object({
   // 5초로 폴링하면 12번 중 11번이 416 이다. flush 당 3회 확인하는 20초로 둔다.
   TAIL_POLL_INTERVAL_MS: int(20000, 1000),
   TAIL_INITIAL_BYTES: int(262144, 1024),
-  TAIL_BUFFER_MAX_LINES: int(50000, 100),
-  TAIL_BUFFER_MAX_BYTES: int(134217728, 1024 * 1024),
+  /**
+   * 세션당 링버퍼 상한.
+   *
+   * 이건 '세션마다' 다. 창을 넷 열면 넷 다 이만큼 쥔다.
+   * 24시간 켜두면 꽉 찬 상태가 정상이므로, 기본값은 곧 상시 점유 메모리다.
+   * 5만 줄/128MB 는 몇 시간 보고 닫는 쓰임에는 맞지만 상시 모니터에는 과하다.
+   */
+  TAIL_BUFFER_MAX_LINES: int(20000, 100),
+  TAIL_BUFFER_MAX_BYTES: int(33554432, 1024 * 1024),
   TAIL_IDLE_TIMEOUT_MS: int(300000, 1000),
   SEARCH_MAX_RESULT_LINES: int(200000, 100),
   EXPORT_MAX_BYTES: int(524288000, 1024),

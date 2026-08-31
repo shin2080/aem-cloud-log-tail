@@ -7,12 +7,22 @@ import { requireUser, fail, clientIp } from '../auth/middleware.js';
 import { authorizeEnv } from '../auth/authz.js';
 import { audit } from '../auth/audit.js';
 import { hasParser } from '../parse/parser.js';
-import type { TailEvent } from '../tail/session.js';
+import { tailKeyOf, type TailEvent } from '../tail/session.js';
 
 const PING_INTERVAL_MS = 15_000;
 /** 배치 기준: 100ms 디바운스 또는 500건 */
 const FLUSH_DEBOUNCE_MS = 100;
 const FLUSH_MAX_BATCH = 500;
+
+/**
+ * 같은 사람이 같은 대상을 다시 열어도 이 시간 안이면 기록을 남기지 않는다.
+ *
+ * EventSource 는 끊기면 몇 초 간격으로 계속 다시 붙는다. 그대로 두면 서버가 잠깐 죽거나
+ * 네트워크가 흔들릴 때마다 tail_open 이 초당 몇 건씩 쌓인다 — 모니터에 걸어두면
+ * 하룻밤에 수만 건이다. 그러면 감사 기록의 이메일 검색(LIKE)이 느려지고,
+ * 정작 사람이 실제로 무엇을 봤는지가 재연결 잡음에 묻힌다.
+ */
+const AUDIT_DEDUPE_MS = 10 * 60_000;
 
 const query = z.object({
   org: z.string().min(1).max(64),
@@ -37,6 +47,24 @@ function sse(reply: FastifyReply, event: string, data?: unknown): void {
 
 export function registerTailRoutes(app: FastifyInstance, ctx: AppContext): void {
   const { db } = ctx.handle;
+
+  /** 최근에 기록한 (사용자, 대상) → 시각. 재연결 잡음을 걸러내기 위한 것뿐이다. */
+  const lastAudited = new Map<string, number>();
+  const auditSweep = setInterval(() => {
+    const cutoff = Date.now() - AUDIT_DEDUPE_MS;
+    for (const [k, at] of lastAudited) if (at < cutoff) lastAudited.delete(k);
+  }, AUDIT_DEDUPE_MS);
+  auditSweep.unref();
+
+  /** 방금 남긴 것과 같은 열람이면 false. 처음이거나 시간이 지났으면 true 를 주고 기억한다. */
+  const shouldAudit = (userId: string, target: string): boolean => {
+    const k = `${userId} ${target}`;
+    const now = Date.now();
+    const prev = lastAudited.get(k);
+    if (prev !== undefined && now - prev < AUDIT_DEDUPE_MS) return false;
+    lastAudited.set(k, now);
+    return true;
+  };
 
   app.get('/api/tail', async (req, reply) => {
     const su = requireUser(req, reply);
@@ -150,16 +178,19 @@ export function registerTailRoutes(app: FastifyInstance, ctx: AppContext): void 
       return reply;
     }
 
-    audit(db, {
-      userId: su.user.id,
-      userEmail: su.user.email,
-      action: 'tail_open',
-      orgKey: grant.org.key,
-      environmentId: grant.env.environmentId,
-      environmentType: grant.env.environmentType,
-      detail: { service: key.service, logName: key.logName, levels },
-      ip: clientIp(req),
-    });
+    // 재연결로 다시 붙은 것은 새로운 열람이 아니다. 사람이 실제로 연 것만 남긴다.
+    if (shouldAudit(su.user.id, `${tailKeyOf(key)} ${levels?.join(',') ?? '*'}`)) {
+      audit(db, {
+        userId: su.user.id,
+        userEmail: su.user.email,
+        action: 'tail_open',
+        orgKey: grant.org.key,
+        environmentId: grant.env.environmentId,
+        environmentType: grant.env.environmentType,
+        detail: { service: key.service, logName: key.logName, levels },
+        ip: clientIp(req),
+      });
+    }
 
     // 이미 버퍼에 쌓인 것을 먼저 넘긴다. 화면이 비어 있는 채로 시작하지 않게.
     const buffered = handle.session.snapshot();

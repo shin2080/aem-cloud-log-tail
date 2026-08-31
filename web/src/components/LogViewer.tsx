@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Box, Button, Center, Group, Stack, Text } from '@mantine/core';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import type { LogEntry } from '@shared/types';
@@ -99,9 +99,13 @@ export function LogViewer({
     onSelectionChange?.(null);
   }, [onSelectionChange]);
 
-  const selectedCount = selection
-    ? entries.filter((e) => e.seq >= selection.fromSeq && e.seq <= selection.toSeq).length
-    : 0;
+  // 메모 없이 두면 SSE 배치마다(초당 10회) 전체를 훑는다. 선택은 대개 없거나 몇 줄이다.
+  const selectedCount = useMemo(() => {
+    if (!selection) return 0;
+    let n = 0;
+    for (const e of entries) if (e.seq >= selection.fromSeq && e.seq <= selection.toSeq) n++;
+    return n;
+  }, [entries, selection]);
 
   const virtualizer = useVirtualizer({
     count: entries.length,
@@ -110,6 +114,30 @@ export function LogViewer({
     overscan: 24,
     getItemKey: (i) => entries[i]?.seq ?? i,
   });
+
+  /**
+   * react-virtual 이 측정한 높이를 담아두는 Map 을 주기적으로 훑어낸다.
+   *
+   * 이 캐시는 getItemKey 가 돌려준 키(여기서는 seq)로 쌓이고, 라이브러리는
+   * `enabled` 가 꺼질 때 말고는 지우지 않는다. 링버퍼에서 밀려난 줄의 키도 그대로 남아,
+   * 하루 종일 켜두면 이 Map 하나가 수백 MB 로 자란다. 몇 시간 쓰다 닫으면 안 보이고
+   * 모니터에 걸어둬야 보이는 종류의 누수라, 여기서 직접 치운다.
+   *
+   * 살아 있는 키만 남기므로 측정값은 그대로다 — 다시 재는 일도 없다.
+   */
+  const pruneMeasurementCache = useCallback(() => {
+    const cache = (virtualizer as unknown as { itemSizeCache?: unknown }).itemSizeCache;
+    // 라이브러리가 바뀌어 이 필드가 사라졌다면 조용히 넘어간다. 화면이 죽을 일은 아니다.
+    if (!(cache instanceof Map)) return;
+    // 밀려난 만큼이 쌓였을 때만 훑는다. 배치마다 하면 그게 더 비싸다.
+    if (cache.size <= entries.length * 2 + 1000) return;
+
+    const live = new Set(entries.map((e) => e.seq));
+    for (const key of [...cache.keys()]) if (!live.has(key as number)) cache.delete(key);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [entries]);
+
+  useEffect(pruneMeasurementCache, [pruneMeasurementCache]);
 
   // 상태와 별도로 ref 를 둔다. 스크롤 핸들러가 낡은 클로저를 보면 추적이 끊긴다.
   const stickRef = useRef(true);
