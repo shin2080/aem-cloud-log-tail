@@ -210,3 +210,85 @@ describe('maskEntry — 엔트리의 모든 문자열 필드', () => {
     assert.equal(maskEntry(e, new Masker(false)), e);
   });
 });
+
+/**
+ * 규칙마다 붙은 빠른 검사(`when`)는 성능을 위한 것이지 규칙의 일부가 아니다.
+ * 여기서 조건을 잘못 좁히면 가려져야 할 것이 조용히 통과한다 —
+ * 가장 알아채기 어려운 종류의 유출이라, 검사를 뗀 것과 결과가 같은지 못 박아둔다.
+ */
+describe('마스킹 — 빠른 검사가 규칙을 좁히지 않는다', () => {
+  const guarded = new Masker(true);
+  // `when` 을 떼어낸 같은 규칙들
+  const bare = new Masker(
+    true,
+    DEFAULT_RULES.map((r) => ({ name: r.name, apply: r.apply })),
+  );
+
+  const CORPUS = [
+    'user hong@example.com logged in',
+    'Bearer eyJhbGciOiJSUzI1NiJ9.abcdefghijklmnopqrstuvwxyz',
+    'Authorization: Basic YWRtaW46cGFzc3dvcmQxMjM0NQ==',
+    'from 203.0.113.42 to 2001:db8:85a3::8a2e:370:7334',
+    'password=hunter2 token=abcdef1234567890 apikey: zzz',
+    '29.08.2026 12:00:01.234 *ERROR* [sling-threadpool-1] com.adobe.cq.Foo 실패 1787924224661',
+    '203.0.113.42 - - [29/Aug/2026:00:58:48 +0000] "GET /a.html HTTP/2.0" 200 15234',
+    '\tat com.adobe.granite.repository.impl.SlingRepositoryImpl.login(SlingRepositoryImpl.java:234)',
+    'card 4111 1111 1111 1111 rrn 900101-1234567',
+    'no-at-sign-here just.words and 1.2.3.4',
+    '',
+  ];
+
+  for (const line of CORPUS) {
+    test(`같은 결과: ${line.slice(0, 40) || '(빈 줄)'}`, () => {
+      assert.equal(guarded.mask(line)[0], bare.mask(line)[0]);
+      assert.equal(guarded.mask(line)[1], bare.mask(line)[1]);
+    });
+  }
+});
+
+/**
+ * access 로그는 줄마다 UA 를 달고 온다. `Chrome/152.0.0.0` 이 IP 로 읽히면
+ * 거의 모든 줄에 masked 배지가 붙어 배지가 의미를 잃는다 —
+ * 정작 진짜 개인정보가 가려진 줄을 못 알아보게 된다.
+ *
+ * 반대로 URL 안의 실주소는 계속 가려야 한다. 둘의 경계가 이 파일에서 가장 미묘한 부분이다.
+ */
+describe('IP 마스킹 — 버전 문자열과 실주소 가르기', () => {
+  const UA =
+    'ua=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 ' +
+    '(KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36';
+
+  test('UA 의 브라우저 버전은 건드리지 않는다', () => {
+    assert.equal(mask(UA), UA);
+    assert.equal(didMask(UA), false, 'masked 배지가 붙으면 안 된다');
+  });
+
+  test('네 자리가 전부 255 이하인 버전도 건드리지 않는다', () => {
+    for (const v of ['Chrome/152.0.0.0', 'Firefox/128.0.0.1', 'MyApp/10.20.30.40']) {
+      assert.equal(mask(`ua=${v} 끝`), `ua=${v} 끝`, v);
+    }
+  });
+
+  test('URL 안의 공인 주소는 여전히 가린다 ← 좁게 자른 이유', () => {
+    assert.equal(mask('proxy to http://203.0.113.42/health'), 'proxy to http://203.0.*.*/health');
+    assert.equal(mask('https://198.51.100.7:8080/x'), 'https://198.51.*.*:8080/x');
+  });
+
+  test('평범한 자리의 공인 주소는 그대로 가린다', () => {
+    assert.equal(mask('203.0.113.42 - - [29/Aug/2026:00:58:48 +0000]'), '203.0.*.* - - [29/Aug/2026:00:58:48 +0000]');
+    assert.equal(mask('cli_ip=198.51.100.7'), 'cli_ip=198.51.*.*');
+    assert.equal(mask('from 203.0.113.42 to 198.51.100.7'), 'from 203.0.*.* to 198.51.*.*');
+  });
+
+  test('사설 대역은 여전히 남긴다', () => {
+    assert.equal(mask('upstream 10.1.2.3:4503'), 'upstream 10.1.2.3:4503');
+  });
+
+  /** 실물 access 로그 한 줄. 클라이언트 IP 는 가려지고 UA 버전은 살아야 한다 */
+  test('access 로그 한 줄에서 둘이 동시에 맞는다', () => {
+    const line = `203.0.113.42 - - [29/Aug/2026:00:58:48 +0000] "GET /a.html HTTP/2.0" 200 15234 "-" "${UA}"`;
+    const out = mask(line);
+    assert.ok(out.startsWith('203.0.*.*'), '클라이언트 IP 는 가려져야 한다');
+    assert.ok(out.includes('Chrome/152.0.0.0'), '브라우저 버전은 살아야 한다');
+  });
+});

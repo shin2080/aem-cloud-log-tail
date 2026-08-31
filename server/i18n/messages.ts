@@ -44,7 +44,8 @@ export const ko = {
   session_id_required: 'sessionId 가 필요하다',
   session_id_format: 'sessionId 형식이 올바르지 않다',
   tail_session_gone: '그 tail 세션이 없다. 화면을 다시 열고 시도한다',
-  empty_export: '내보낼 줄이 없다. 범위나 필터를 확인한다',
+  empty_export:
+    '내보낼 줄이 없다. 고른 줄이 서버 버퍼에서 이미 밀려났을 수 있다 — 그때는 시간대 조회에서 찾는다',
   export_too_large: '내보낼 양이 {size} ({lines}줄) 로 상한 {max} 을 넘는다. 구간을 좁히거나 레벨을 줄인다',
 
   /* 저장된 필터 */
@@ -107,7 +108,8 @@ export const en: Record<MsgKey, string> = {
   session_id_required: 'sessionId is required',
   session_id_format: 'sessionId is malformed',
   tail_session_gone: 'That tail session is gone. Reopen the pane and try again.',
-  empty_export: 'Nothing to export. Check the range and the filter.',
+  empty_export:
+    'Nothing to export. The lines you picked may already have been pushed out of the server buffer — the time-range search still finds them.',
   export_too_large:
     'The export would be {size} ({lines} lines), over the {max} limit. Narrow the range or drop some levels.',
 

@@ -55,6 +55,22 @@ function isPrivateIpv4(a: number, b: number): boolean {
 }
 
 /**
+ * 공인 IPv4 후보.
+ *
+ * `Word/1.2.3.4` 는 IP 가 아니라 버전 문자열이다. access 로그는 줄마다 UA 를 달고 오는데,
+ * `Chrome/152.0.0.0` 의 네 자리가 전부 255 이하라 그대로 두면 IP 로 읽힌다.
+ * 그러면 거의 모든 access 줄에 masked 배지가 붙어 배지가 의미를 잃는다 —
+ * 정작 진짜 개인정보가 가려진 줄을 못 알아본다.
+ *
+ * 앞이 `영숫자 + /` 일 때만 건너뛴다. `http://203.0.113.42` 는 앞이 `//` 라 그대로 가려진다.
+ * 이 구분을 좁게 잡은 이유는, 넓히면(예: `/` 만 보면) URL 안의 실주소를 놓치기 때문이다.
+ *
+ * 남는 한계: 공백 뒤의 `2.14.0.4` 같은 번들 버전은 여전히 가려진다.
+ * 문맥만으로는 진짜 공인 IP 와 구분할 수 없어서, 가리는 쪽으로 남겨둔다.
+ */
+const IPV4 = /(?<![A-Za-z0-9]\/)\b(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})\b/g;
+
+/**
  * IPv6 를 정규식 하나로 처리하면 `::` 압축형에서 주소 중간부터 매칭돼
  * 앞 헥스텟을 놓친다 (fe80::1234:... 를 1234 로 읽어 링크로컬 판정을 못 한다).
  * 후보를 통째로 뽑은 뒤 따로 판단한다.
@@ -124,7 +140,7 @@ export const DEFAULT_RULES: MaskRule[] = [
      */
     name: 'ipv4',
     apply: (t) =>
-      t.replace(/\b(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})\b/g, (m, A: string, B: string, C: string, D: string) => {
+      t.replace(IPV4, (m, A: string, B: string, C: string, D: string) => {
         const [a, b, c, d] = [+A, +B, +C, +D];
         if ([a, b, c, d].some((n) => n > 255)) return m; // IP 가 아니다 (버전 문자열 등)
         if (isPrivateIpv4(a, b)) return m;
