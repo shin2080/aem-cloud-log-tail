@@ -169,6 +169,10 @@ export const ko = {
     '파일 첫머리에 조직·환경·구간·필터·요청자가 기록된다. 며칠 뒤에도 출처를 알 수 있다.',
   'export.submit': '내보내기',
   'export.failed': '내보내기에 실패했다',
+  'export.shortfall': '선택한 {want}줄 중 {have}줄만 서버에 남아 있다',
+  'export.shortfallWhy':
+    '나머지는 링버퍼에서 밀려났다. 화면은 레벨 필터를 통과한 것만 쌓기 때문에 서버보다 오래 들고 있을 수 있다. 밀려난 줄은 시간대 조회에서 찾는다.',
+  'export.downloadAnyway': '{n}줄만 받기',
 
   /* ── 저장된 필터 ──────────────────────────────────────── */
   'filters.label': '필터',
@@ -439,6 +443,10 @@ export const en: Record<StringKey, string> = {
     'The org, environment, range, filter, and requester are written at the top of the file. Months later you can still tell where it came from.',
   'export.submit': 'Export',
   'export.failed': 'Export failed',
+  'export.shortfall': 'Only {have} of the {want} selected lines are still on the server',
+  'export.shortfallWhy':
+    'The rest were pushed out of the ring buffer. This pane keeps only what passed the level filter, so it can hold lines longer than the server does. The time-range search still finds them.',
+  'export.downloadAnyway': 'Download {n} line|Download {n} lines',
 
   /* ── saved filters ────────────────────────────────────── */
   'filters.label': 'Filters',
