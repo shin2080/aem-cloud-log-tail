@@ -289,3 +289,48 @@ describe('알림 감시 — 소음 제어', () => {
     assert.equal(handle.db.select().from(alertHits).all().length, 2);
   });
 });
+
+/**
+ * 알림은 앱 밖으로 나간다 — OS 토스트는 잠금화면과 알림센터에 남고,
+ * 화면을 공유하는 중에도 뜬다. '로그 본문은 메모리에만' 이 이 도구의 전제인데
+ * 알림이 그 구멍이 되면 안 된다.
+ *
+ * 화면에서 조심하는 것으로는 부족하다. 애초에 본문이 클라이언트까지 오지 않아야 한다.
+ * 그 성질을 데이터 모양으로 못 박는다.
+ */
+describe('알림 감시 — 본문은 나가지 않는다', () => {
+  const SECRET = 'OutOfMemoryError: Java heap space';
+
+  test('DB 에 남는 히트에 로그 본문이 없다', async () => {
+    makeRule();
+    await watcher.sync();
+    tails.feed(TARGET, [entry({ raw: `12:00:01 *ERROR* ${SECRET}`, message: SECRET })]);
+
+    const row = handle.db.select().from(alertHits).all()[0]!;
+    const dumped = JSON.stringify(row);
+    assert.ok(!dumped.includes('heap space'), `히트 행에 본문이 새어 나갔다: ${dumped}`);
+    assert.ok(!dumped.includes('OutOfMemoryError'), '히트 행에 본문이 새어 나갔다');
+  });
+
+  test('화면으로 밀어주는 이벤트에도 본문이 없다', async () => {
+    const events: unknown[] = [];
+    watcher.subscribe((e) => events.push(e));
+    makeRule();
+    await watcher.sync();
+    tails.feed(TARGET, [entry({ raw: `12:00:01 *ERROR* ${SECRET}`, message: SECRET })]);
+
+    const dumped = JSON.stringify(events);
+    assert.equal(events.length, 1);
+    assert.ok(!dumped.includes('heap space'), `이벤트에 본문이 새어 나갔다: ${dumped}`);
+  });
+
+  /** 지문은 알림을 묶는 데만 쓴다. 숫자가 지워진 형태라 원문 복원에 쓸 수 없어야 한다 */
+  test('지문에도 사람이 읽을 본문이 남지 않는다', async () => {
+    makeRule({ pattern: '카드' });
+    await watcher.sync();
+    tails.feed(TARGET, [entry({ raw: '카드 4111111111111111 승인', message: '카드 4111111111111111 승인' })]);
+
+    const row = handle.db.select().from(alertHits).all()[0]!;
+    assert.ok(!row.signature.includes('4111111111111111'), '지문에 숫자가 그대로 남았다');
+  });
+});

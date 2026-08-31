@@ -156,7 +156,11 @@ export const alertHits = sqliteTable(
     ruleId: text('rule_id')
       .notNull()
       .references(() => alertRules.id, { onDelete: 'cascade' }),
-    /** 같은 사건인지 가르는 지문. 쿨다운은 이 단위로 건다 */
+    /**
+     * 같은 사건인지 가르는 지문의 **해시**. 쿨다운은 이 단위로 건다.
+     * 원문을 넣으면 정규화된 로그 메시지가 읽을 수 있는 채로 남는다 —
+     * 비교는 동등성만 필요하므로 해시로 둔다.
+     */
     signature: text('signature').notNull(),
     firstTs: integer('first_ts').notNull(),
     lastTs: integer('last_ts').notNull(),

@@ -3,7 +3,8 @@ import { Badge, Box, Button, Group, Indicator, Menu, Stack, Text, UnstyledButton
 import { useNavigate } from 'react-router-dom';
 import { api } from '../api/client';
 import { paneUrlFor, useAlertStream, type AlertHit } from '../api/alerts';
-import { useT } from '../i18n';
+import { notifyState, showHitNotification, toggleDesktopNotify, type NotifyState } from '../lib/desktopNotify';
+import { useT, type StringKey } from '../i18n';
 
 const LEVEL_COLOR: Record<string, string> = { ERROR: 'red', WARN: 'yellow' };
 
@@ -14,12 +15,22 @@ function ago(ms: number, now: number): string {
   return `${Math.floor(s / 3600)}시간`;
 }
 
+const NOTIFY_LABEL: Record<NotifyState, StringKey> = {
+  on: 'alerts.desktopOn',
+  off: 'alerts.desktopOff',
+  blocked: 'alerts.desktopBlocked',
+  unsupported: 'alerts.desktopUnsupported',
+};
+
 /**
- * 머리줄의 벨. 1단계 전달 경로는 이것 하나다.
+ * 머리줄의 벨.
  *
- * 모니터에 띄워두는 것이 전제라 화면은 늘 열려 있고, 그러면 앱 안에서 알리는 것으로
- * 충분하다. 닫혀 있을 때도 받으려면 웹푸시가 필요한데, 그건 새 노출면(제3자 푸시
- * 서비스)을 만드는 결정이라 따로 정해야 한다.
+ * 앱 안의 알림함(1단계)과 OS 토스트(2단계) 둘 다 여기서 나간다.
+ * 토스트는 창이 다른 것에 가려 있을 때를 위한 것이다 — 모니터에 띄워둔 화면이
+ * 뒤에 있으면 배지가 바뀌어도 아무도 못 본다.
+ *
+ * 닫혀 있을 때도 받으려면 웹푸시가 필요한데, 그건 새 노출면(제3자 푸시 서비스)을
+ * 만드는 결정이라 따로 정해야 한다.
  */
 export function AlertBell() {
   const t = useT();
@@ -28,6 +39,12 @@ export function AlertBell() {
   const [hits, setHits] = useState<AlertHit[]>([]);
   const [now, setNow] = useState(Date.now());
   const { unread, latest, setUnread } = useAlertStream(true);
+  const [notify, setNotify] = useState<NotifyState>('off');
+
+  // 권한은 브라우저가 들고 있다. 다른 탭에서 바꿨을 수도 있으니 열 때마다 다시 본다.
+  useEffect(() => {
+    setNotify(notifyState());
+  }, [opened]);
 
   const load = useCallback(async () => {
     try {
@@ -47,7 +64,18 @@ export function AlertBell() {
   useEffect(() => {
     if (!latest) return;
     setHits((cur) => (cur.some((h) => h.id === latest.id) ? cur : [latest, ...cur].slice(0, 50)));
-  }, [latest]);
+
+    // OS 토스트. 규칙 이름과 어디서 몇 건인지까지만 싣는다 —
+    // 알림은 잠금화면과 알림센터에 남으므로 로그 본문이 거기 갈 이유가 없다.
+    void showHitNotification(
+      latest,
+      {
+        title: latest.ruleName,
+        body: t('alerts.notifyBody', { service: latest.service, logName: latest.logName, n: latest.count }),
+      },
+      paneUrlFor(latest),
+    );
+  }, [latest, t]);
 
   // '몇 분 전' 이 멈춰 있으면 알림이 언제 온 건지 알 수 없다.
   useEffect(() => {
@@ -103,6 +131,30 @@ export function AlertBell() {
             </Button>
           </Group>
         </Group>
+
+        {/*
+          데스크톱 알림 켜기. 권한 요청은 반드시 사람이 누른 자리에서 해야 한다 —
+          로드하자마자 물어보면 브라우저가 무시하고 사람도 이유를 모른 채 거절한다.
+        */}
+        <Box px="sm" pb={6} style={{ borderBottom: '1px solid var(--mantine-color-dark-4)' }}>
+          <Group justify="space-between" wrap="nowrap" gap="xs">
+            <Box style={{ minWidth: 0 }}>
+              <Text size="xs">{t('alerts.desktop')}</Text>
+              <Text size="xs" c="dimmed">
+                {notify === 'blocked' ? t('alerts.desktopBlockedHint') : t('alerts.desktopNote')}
+              </Text>
+            </Box>
+            <Button
+              size="compact-xs"
+              variant={notify === 'on' ? 'filled' : 'default'}
+              color={notify === 'blocked' ? 'yellow' : 'gray'}
+              disabled={notify === 'unsupported' || notify === 'blocked'}
+              onClick={() => void toggleDesktopNotify().then(setNotify)}
+            >
+              {t(NOTIFY_LABEL[notify])}
+            </Button>
+          </Group>
+        </Box>
 
         <Box style={{ maxHeight: 380, overflowY: 'auto' }}>
           {hits.length === 0 ? (

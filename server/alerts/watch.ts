@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { and, desc, eq, isNull, lt, sql } from 'drizzle-orm';
 import type { AppContext } from '../context.js';
 import type { LogEntry } from '../../shared/types.js';
@@ -37,6 +37,18 @@ interface Watched {
 
 /** 권한 재확인 주기. 열린 SSE 와 같은 이유다 — 회수가 반영되지 않으면 회수가 아니다. */
 const RECHECK_INTERVAL_MS = 60_000;
+
+/**
+ * 지문을 해시해서 넣는다.
+ *
+ * 지문은 같은 사건인지 비교하는 데만 쓰이므로 원문일 이유가 없다.
+ * 그냥 넣으면 정규화된 로그 메시지가 사람이 읽을 수 있는 채로 DB 에 남는다 —
+ * '로그 본문은 메모리에만' 이라고 해놓고 알림 테이블로 새어 나가는 셈이다.
+ * 비교는 동등성만 필요하니 해시로 충분하다.
+ */
+function fingerprint(entry: LogEntry): string {
+  return createHash('sha256').update(signatureOf(entry)).digest('hex');
+}
 
 function targetOf(r: AlertRuleRow): TailKey {
   return { orgKey: r.orgKey, environmentId: r.environmentId, service: r.service, logName: r.logName };
@@ -253,7 +265,7 @@ export class AlertWatcher {
    */
   private record(rule: AlertRuleRow, entry: LogEntry): void {
     const { db } = this.ctx.handle;
-    const signature = signatureOf(entry);
+    const signature = fingerprint(entry);
     const key = `${rule.id} ${signature}`;
     const now = Date.now();
 

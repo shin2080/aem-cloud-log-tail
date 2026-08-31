@@ -280,6 +280,14 @@ export const ko = {
   'alerts.markAllRead': '모두 읽음',
   'alerts.manage': '규칙 관리',
   'alerts.lagNote': '로그가 스토리지에 도착하는 데 2분쯤 걸린다. 알림도 그만큼 늦는다.',
+  'alerts.desktop': '데스크톱 알림',
+  'alerts.desktopOn': '켜짐',
+  'alerts.desktopOff': '꺼짐',
+  'alerts.desktopBlocked': '차단됨',
+  'alerts.desktopBlockedHint': '브라우저 설정에서 이 사이트의 알림을 허용해야 한다.',
+  'alerts.desktopUnsupported': '이 브라우저는 지원하지 않는다',
+  'alerts.desktopNote': '창이 다른 것에 가려 있어도 뜬다. 로그 본문은 싣지 않는다.',
+  'alerts.notifyBody': '{service} · {logName} · {n}건',
 
   /* ── 알림 규칙 ────────────────────────────────────────── */
   'rules.title': '알림 규칙',
@@ -597,6 +605,14 @@ export const en: Record<StringKey, string> = {
   'alerts.markAllRead': 'Mark all read',
   'alerts.manage': 'Manage rules',
   'alerts.lagNote': 'Logs take about two minutes to reach storage. Alerts lag by the same.',
+  'alerts.desktop': 'Desktop notifications',
+  'alerts.desktopOn': 'On',
+  'alerts.desktopOff': 'Off',
+  'alerts.desktopBlocked': 'Blocked',
+  'alerts.desktopBlockedHint': 'Allow notifications for this site in your browser settings.',
+  'alerts.desktopUnsupported': 'This browser does not support them',
+  'alerts.desktopNote': 'They show even when the window is behind something. No log text is included.',
+  'alerts.notifyBody': '{service} · {logName} · {n} hit|{service} · {logName} · {n} hits',
 
   /* ── alert rules ──────────────────────────────────────── */
   'rules.title': 'Alert rules',

@@ -63,6 +63,30 @@ self.addEventListener('message', (event) => {
   }
 });
 
+/**
+ * 데스크톱 알림을 눌렀을 때.
+ *
+ * 이미 열려 있는 창이 있으면 그 창을 앞으로 가져와 그 자리로 보낸다.
+ * 새 창을 여는 것은 마지막 수단이다 — 모니터에 띄워둔 화면이 있는데 창이 하나 더
+ * 생기면, 사람이 알림을 누를수록 화면이 늘어난다.
+ */
+self.addEventListener('notificationclick', (event) => {
+  const url = event.notification.data?.url || '/';
+  event.notification.close();
+
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((all) => {
+      for (const c of all) {
+        if (!c.url.startsWith(self.location.origin)) continue;
+        // navigate 가 없는 브라우저도 있다. 그때는 앞으로 가져오기만 한다.
+        if ('navigate' in c) return c.navigate(url).then((n) => n?.focus());
+        return c.focus();
+      }
+      return self.clients.openWindow(url);
+    }),
+  );
+});
+
 self.addEventListener('fetch', (event) => {
   const req = event.request;
 
