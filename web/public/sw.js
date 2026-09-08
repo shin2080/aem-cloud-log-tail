@@ -18,7 +18,7 @@
  * 로그 자체는 SSE 로 서버에서 직접 오므로 오프라인에서 볼 수 있는 것은 없다.
  */
 
-const CACHE = 'aclv-shell-v1';
+const CACHE = 'aclv-shell-v2';
 
 /** 이 경로로 가는 것은 서비스워커가 아예 건드리지 않는다. */
 function isOffLimits(url) {
@@ -33,9 +33,8 @@ function isHashedAsset(url) {
 self.addEventListener('install', (event) => {
   // 껍데기 하나만 미리 받아둔다. 나머지는 실제로 쓰일 때 담긴다.
   event.waitUntil(
-    caches
-      .open(CACHE)
-      .then((c) => c.add(new Request('/', { cache: 'reload' })))
+    fetch(new Request('/', { cache: 'reload' }))
+      .then((res) => (res.ok ? cacheShell(res) : null))
       .catch(() => {
         // 설치 시점에 서버가 없을 수도 있다. 그래도 워커는 살아야 한다.
       })
@@ -87,6 +86,35 @@ self.addEventListener('notificationclick', (event) => {
   );
 });
 
+/**
+ * 껍데기를 캐시한다. **HTML 과 그 HTML 이 부르는 자산을 함께 담는다.**
+ *
+ * 예전에는 HTML 만 담았다. 자산은 브라우저가 실제로 요청할 때 담기는데, 그 사이에
+ * 서버가 죽으면 캐시에는 '새 HTML + 없는 자산' 만 남는다. 그러면 오프라인에서
+ * 껍데기는 나오는데 스크립트가 없어서 **흰 화면**이 된다 — 로그인 창조차 못 본다.
+ * 실제로 그렇게 당했다. 자산을 먼저 담고, 하나라도 실패하면 HTML 도 담지 않는다.
+ *
+ * 겸사겸사 새 HTML 이 더 이상 참조하지 않는 옛 번들을 지운다.
+ * 안 지우면 배포할 때마다 쌓이기만 한다.
+ */
+async function cacheShell(res) {
+  const html = await res.clone().text();
+  const refs = [...html.matchAll(/(?:src|href)="(\/assets\/[^"]+)"/g)].map((m) => m[1]);
+
+  const c = await caches.open(CACHE);
+  // 하나라도 실패하면 addAll 이 통째로 던진다. 그때는 HTML 도 담지 않는다 —
+  // 반쪽짜리 캐시보다 캐시가 없는 편이 낫다 (그러면 그냥 네트워크로 간다).
+  await c.addAll(refs);
+  await c.put('/', res);
+
+  // 이제 쓰이지 않는 자산 정리
+  const keep = new Set([...refs, '/']);
+  for (const req of await c.keys()) {
+    const path = new URL(req.url).pathname;
+    if (path.startsWith('/assets/') && !keep.has(path)) await c.delete(req);
+  }
+}
+
 self.addEventListener('fetch', (event) => {
   const req = event.request;
 
@@ -104,10 +132,7 @@ self.addEventListener('fetch', (event) => {
     event.respondWith(
       fetch(req)
         .then((res) => {
-          if (res.ok) {
-            const copy = res.clone();
-            caches.open(CACHE).then((c) => c.put('/', copy));
-          }
+          if (res.ok) event.waitUntil(cacheShell(res.clone()));
           return res;
         })
         .catch(() => caches.match('/').then((hit) => hit ?? Response.error())),
@@ -120,13 +145,17 @@ self.addEventListener('fetch', (event) => {
     event.respondWith(
       caches.match(req).then((hit) => {
         if (hit) return hit;
-        return fetch(req).then((res) => {
-          if (res.ok) {
-            const copy = res.clone();
-            caches.open(CACHE).then((c) => c.put(req, copy));
-          }
-          return res;
-        });
+        return fetch(req)
+          .then((res) => {
+            if (res.ok) {
+              const copy = res.clone();
+              caches.open(CACHE).then((c) => c.put(req, copy));
+            }
+            return res;
+          })
+          // 캐시에도 없고 네트워크도 없다. 여기서 그냥 던지면 브라우저에는
+          // '스크립트 로드 실패' 만 남고 화면은 아무것도 안 그려진다.
+          .catch(() => new Response('', { status: 504, statusText: 'asset unavailable' }));
       }),
     );
     return;

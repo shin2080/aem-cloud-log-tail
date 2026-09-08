@@ -327,6 +327,7 @@ export const ko = {
 
   /* ── 서버가 돌려주는 오류 ─────────────────────────────── */
   'err.requestFailed': '요청이 실패했다 ({status})',
+  'err.unreachable': '서버에 닿지 못했습니다. 서버가 떠 있는지 확인하세요 (npm start).',
 } as const;
 
 export type StringKey = keyof typeof ko;
@@ -658,4 +659,5 @@ export const en: Record<StringKey, string> = {
 
   /* ── errors from the server ───────────────────────────── */
   'err.requestFailed': 'The request failed ({status})',
+  'err.unreachable': 'Could not reach the server. Check that it is running (npm start).',
 };

@@ -17,12 +17,27 @@ export class ApiRequestError extends Error {
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const lang = currentLang();
-  const res = await fetch(path, {
-    ...init,
-    credentials: 'same-origin', // 세션 쿠키
-    // 오류 메시지는 서버가 만든다. 어느 말로 받을지 여기서 알려준다.
-    headers: { 'Content-Type': 'application/json', 'X-Lang': lang, ...(init.headers ?? {}) },
-  });
+
+  /*
+    서버에 닿지도 못한 경우와 서버가 거절한 경우는 다른 일이다.
+
+    fetch 가 그냥 던지게 두면 화면마다 자기 말로 받아서, 로그인 화면은
+    "로그인에 실패했다" 를 띄운다 — 비밀번호가 틀린 것과 구분이 안 된다.
+    서비스워커가 앱 껍데기를 캐시에서 내주기 때문에 서버가 죽어도 화면은 멀쩡히
+    떠서, 사람은 비밀번호부터 의심하게 된다. 실제로 그렇게 헤맸다.
+  */
+  let res: Response;
+  try {
+    res = await fetch(path, {
+      ...init,
+      credentials: 'same-origin', // 세션 쿠키
+      // 오류 메시지는 서버가 만든다. 어느 말로 받을지 여기서 알려준다.
+      headers: { 'Content-Type': 'application/json', 'X-Lang': lang, ...(init.headers ?? {}) },
+    });
+  } catch {
+    // status 0 = 응답 자체가 없었다. 서버가 안 떠 있거나 네트워크가 끊겼다.
+    throw new ApiRequestError(0, 'unreachable', tStatic('err.unreachable'));
+  }
 
   if (!res.ok) {
     const body = (await res.json().catch(() => null)) as ApiError | null;
