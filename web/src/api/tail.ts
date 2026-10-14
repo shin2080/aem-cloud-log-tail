@@ -18,6 +18,8 @@ export interface TailState {
   error: string | null;
   /** 서버 링버퍼에서 밀려난 누적 건수 */
   droppedCount: number;
+  /** 마지막으로 밀려난 시각. 누적 건수를 하루 종일 노란 줄로 띄우지 않으려고 따로 둔다 */
+  droppedAt: number | null;
   rolloverDate: string | null;
   paused: boolean;
   /** 일시정지 중 밀린 건수 */
@@ -49,6 +51,7 @@ export function useTailStream(params: TailParams | null): TailState & {
   const [status, setStatus] = useState<TailStatus>('closed');
   const [error, setError] = useState<string | null>(null);
   const [droppedCount, setDroppedCount] = useState(0);
+  const [droppedAt, setDroppedAt] = useState<number | null>(null);
   const [rolloverDate, setRolloverDate] = useState<string | null>(null);
   const [paused, setPausedState] = useState(false);
   const [pendingCount, setPendingCount] = useState(0);
@@ -146,6 +149,7 @@ export function useTailStream(params: TailParams | null): TailState & {
     setPendingCount(0);
     setBuffered(EMPTY);
     setDroppedCount(0);
+    setDroppedAt(null);
   }, []);
 
   useEffect(() => {
@@ -161,6 +165,7 @@ export function useTailStream(params: TailParams | null): TailState & {
       attempt.current = 0;
       setBuffered(EMPTY);
       setDroppedCount(0);
+    setDroppedAt(null);
       setRolloverDate(null);
       parked.current = EMPTY;
       generation.current = null;
@@ -177,6 +182,7 @@ export function useTailStream(params: TailParams | null): TailState & {
       newestSeq.current = -1;
       setPendingCount(0);
       setDroppedCount(0);
+    setDroppedAt(null);
       setBuffered(EMPTY);
     };
 
@@ -227,6 +233,7 @@ export function useTailStream(params: TailParams | null): TailState & {
     es.addEventListener('truncated', (ev) => {
       const { droppedCount: n } = JSON.parse((ev as MessageEvent<string>).data) as { droppedCount: number };
       setDroppedCount((d) => d + n);
+      setDroppedAt(Date.now());
     });
 
     es.addEventListener('error', (ev) => {
@@ -265,6 +272,7 @@ export function useTailStream(params: TailParams | null): TailState & {
     status,
     error,
     droppedCount,
+    droppedAt,
     rolloverDate,
     paused,
     pendingCount,

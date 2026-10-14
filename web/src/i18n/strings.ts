@@ -98,6 +98,9 @@ export const ko = {
   'pane.noneYetAny': '로그',
   'pane.noneYetHint': '레벨을 넓히거나, 트래픽이 있는지 확인한다.',
   'pane.dropped': '버퍼가 넘쳐 {n}줄이 밀려났다',
+  'pane.droppedTotal': '지금까지 {n}건이 서버 버퍼에서 밀려났다',
+  'pane.clear': '화면 비우기',
+  'pane.applyToAll': '이 필터를 모든 창에',
   'pane.rollover': 'UTC 날짜가 바뀌어 {date} 파일로 넘어갔다',
   'pane.exportSelection': '선택 구간 내보내기',
 
@@ -434,6 +437,9 @@ export const en: Record<StringKey, string> = {
   'pane.noneYetAny': 'log line',
   'pane.noneYetHint': 'Widen the levels, or check that traffic is reaching this environment.',
   'pane.dropped': 'Buffer overflowed — {n} lines were pushed out',
+  'pane.droppedTotal': '{n} lines have dropped off the server buffer so far',
+  'pane.clear': 'Clear screen',
+  'pane.applyToAll': 'Apply this filter to all panes',
   'pane.rollover': 'UTC date rolled over; now reading {date}',
   'pane.exportSelection': 'Export selection',
 

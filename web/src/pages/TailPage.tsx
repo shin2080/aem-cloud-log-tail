@@ -99,6 +99,12 @@ export function TailPage() {
       filters.filter((_, idx) => idx !== i),
     );
 
+  const applyToAll = (f: PaneFilter) =>
+    write(
+      panes,
+      panes.map(() => f),
+    );
+
   const setPaneFilter = (i: number, f: PaneFilter) =>
     write(
       panes,
@@ -172,6 +178,7 @@ export function TailPage() {
             onFilterChange={(f) => setPaneFilter(i, f)}
             sharedSeek={sharedSeek}
             onSeekAll={panes.length > 1 ? seekAll : undefined}
+            onApplyToAll={panes.length > 1 ? applyToAll : undefined}
             timeZone={timeZone}
             fontSize={fontSize}
             closable={panes.length > 1}

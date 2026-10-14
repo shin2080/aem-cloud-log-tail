@@ -71,6 +71,7 @@ export function TailPane({
   onFilterChange,
   sharedSeek,
   onSeekAll,
+  onApplyToAll,
   timeZone,
   fontSize,
   onClose,
@@ -87,6 +88,8 @@ export function TailPane({
   sharedSeek?: { ts: number; n: number } | null;
   /** 이 창에서 Shift+클릭했을 때 모든 창으로 전파한다. 창이 하나면 넘기지 않는다 */
   onSeekAll?: (ts: number) => void;
+  /** 이 창의 필터를 모든 창에 건다. 요청 ID 하나를 계층마다 세 번 치지 않게 한다 */
+  onApplyToAll?: (f: PaneFilter) => void;
   timeZone: TimeZoneMode;
   fontSize: FontSize;
   onClose: () => void;
@@ -171,6 +174,9 @@ export function TailPane({
   }, [sharedSeek]);
 
   const isProd = envInfo?.environmentType === 'prod';
+
+  // 밀려남은 최근 1분만 띄운다. 누적치는 하루 뒤엔 의미 없는 큰 숫자라 건수 툴팁으로 내린다.
+  const recentlyDropped = tail.droppedAt !== null && Date.now() - tail.droppedAt < 60_000;
 
   return (
     <Box
@@ -333,6 +339,16 @@ export function TailPane({
               </Group>
             </Menu.Item>
             <Menu.Divider />
+            {/* 비우고 → 재현하고 → 뭐가 뜨나 본다. 터미널의 clear 와 같은 기본기다. */}
+            <Menu.Item onClick={tail.clear}>
+              <Text size="sm">{t('pane.clear')}</Text>
+            </Menu.Item>
+            {onApplyToAll && (
+              <Menu.Item onClick={() => onApplyToAll(filter)}>
+                <Text size="sm">{t('pane.applyToAll')}</Text>
+              </Menu.Item>
+            )}
+            <Menu.Divider />
             {/*
               지금 보고 있는 조건을 그대로 규칙으로 넘긴다. 대상·검색어·레벨이
               이미 손에 있는데 규칙 화면에서 다시 고르게 하면 같은 UI 가 둘이 된다.
@@ -373,7 +389,12 @@ export function TailPane({
 
         <Group gap={4} wrap="nowrap" style={{ flexShrink: 0 }}>
           {tail.status === 'connecting' && <Loader size={10} />}
-          <Text size="xs" c={tail.status === 'error' ? 'red' : 'dimmed'} style={{ whiteSpace: 'nowrap' }}>
+          <Text
+            size="xs"
+            c={tail.status === 'error' ? 'red' : 'dimmed'}
+            style={{ whiteSpace: 'nowrap' }}
+            title={tail.droppedCount > 0 ? t('pane.droppedTotal', { n: tail.droppedCount }) : undefined}
+          >
             {tail.status === 'open'
               ? tail.entries.length.toLocaleString()
               : tail.status === 'error'
@@ -403,14 +424,14 @@ export function TailPane({
         )}
       </Group>
 
-      {(tail.error || tail.droppedCount > 0 || tail.rolloverDate) && (
+      {(tail.error || recentlyDropped || tail.rolloverDate) && (
         <Group px={6} py={2} gap="md" style={{ flexShrink: 0, background: 'var(--mantine-color-dark-6)' }}>
           {tail.error && (
             <Text size="xs" c="red">
               {tail.error}
             </Text>
           )}
-          {tail.droppedCount > 0 && (
+          {recentlyDropped && (
             <Text size="xs" c="yellow">
               {t('pane.dropped', { n: tail.droppedCount })}
             </Text>
