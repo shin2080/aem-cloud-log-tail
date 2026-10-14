@@ -9,6 +9,7 @@ import { openDb } from './db/index.js';
 import { createContext } from './context.js';
 import { seedInitialAdmin } from './auth/seed.js';
 import { purgeExpiredSessions } from './auth/session.js';
+import { registerJsonBodyParser } from './routes/jsonbody.js';
 import { registerAuthGuard, fail } from './auth/middleware.js';
 import { purgeOldAudit, auditRowCount } from './auth/audit.js';
 import { registerAuthRoutes } from './routes/auth.js';
@@ -56,6 +57,8 @@ async function main(): Promise<void> {
   });
 
   await app.register(cookie, { secret: cfg.SESSION_SECRET });
+
+  registerJsonBodyParser(app);
 
   registerAuthGuard(app, ctx);
   registerAuthRoutes(app, ctx);

@@ -31,8 +31,24 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     res = await fetch(path, {
       ...init,
       credentials: 'same-origin', // 세션 쿠키
-      // 오류 메시지는 서버가 만든다. 어느 말로 받을지 여기서 알려준다.
-      headers: { 'Content-Type': 'application/json', 'X-Lang': lang, ...(init.headers ?? {}) },
+      /*
+        본문이 없으면 Content-Type 도 붙이지 않는다.
+
+        `application/json` 이라고 해놓고 본문을 비워 보내면 Fastify 가 본문 파서에서
+        400(FST_ERR_CTP_EMPTY_JSON_BODY) 으로 끊는다. 이건 인증 훅보다 **앞**이라
+        세션이 멀쩡해도 끊기고, 라우트 안으로는 들어가지도 못한다.
+
+        본문 없는 호출이 적지 않다 — 로그아웃, 조회 취소, 비밀번호 초기화,
+        세션 회수, 계정·알림규칙·저장필터 삭제. 전부 여기에 걸려 있었다.
+        로그아웃이 '눌러도 아무 일도 안 일어나는' 증상으로 먼저 드러났다.
+
+        오류 메시지는 서버가 만드니, 어느 말로 받을지는 X-Lang 으로 알려준다.
+      */
+      headers: {
+        ...(init.body === undefined ? {} : { 'Content-Type': 'application/json' }),
+        'X-Lang': lang,
+        ...(init.headers ?? {}),
+      },
     });
   } catch {
     // status 0 = 응답 자체가 없었다. 서버가 안 떠 있거나 네트워크가 끊겼다.

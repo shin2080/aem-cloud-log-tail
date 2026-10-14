@@ -1,12 +1,13 @@
 import { useEffect } from 'react';
 import { AppShell, Box, Button, Center, Group, Loader, Menu, Text } from '@mantine/core';
+import { notifications } from '@mantine/notifications';
 import { Navigate, Route, Routes } from 'react-router-dom';
 import { SessionProvider, useSession } from './api/session';
 import { LangProvider, useT } from './i18n';
 import { ErrorBoundary, noteHealthy } from './components/ErrorBoundary';
 import { purgeServiceWorkerCaches } from './pwa';
 import { LangToggle } from './components/LangToggle';
-import { api } from './api/client';
+import { api, ApiRequestError } from './api/client';
 import { LoginPage } from './pages/LoginPage';
 import { ChangePasswordPage } from './pages/ChangePasswordPage';
 import { EnvironmentsPage } from './pages/EnvironmentsPage';
@@ -43,12 +44,38 @@ function Shell() {
   // 비밀번호 변경 전에는 다른 화면으로 갈 수 없다. 서버도 403 으로 같이 막는다.
   if (me.mustChangePassword) return <ChangePasswordPage forced />;
 
+  /*
+    로그아웃은 '이 기기에서 나간다' 는 뜻이다. 그래서 서버 호출은 최선의 노력이고,
+    화면을 비우는 것은 무조건이다.
+
+    예전에는 `await api.logout()` 이 맨 앞에 혼자 있었다. 그 호출이 던지면 아래가
+    통째로 건너뛰어지는데, onClick 이 `void logout()` 이라 그 예외를 받는 곳이 없다.
+    사람 눈에는 **눌렀는데 아무 일도 안 일어난다** — 메뉴만 닫히고 그대로다.
+
+    실제로 그 호출은 **늘** 던지고 있었다. fetch 래퍼가 본문도 없이
+    `Content-Type: application/json` 을 붙이는 바람에 Fastify 본문 파서가 400 으로
+    끊었다 (client.ts 참고). 즉 로그아웃은 한 번도 동작한 적이 없다.
+
+    그건 고쳤지만 이 구조는 그대로 두면 안 된다. 세션이 이미 만료됐거나 관리자가
+    끊었으면 인증 훅이 로그아웃 요청까지 401 로 막고, 서버를 재시작한 직후면 닿지도
+    못한다. 둘 다 **화면은 아직 로그인된 것처럼 보이는** 순간이라 — 세션 확인이
+    10분에 한 번이라 그렇다 — 사람이 로그아웃을 누르는 상황과 정확히 겹친다.
+  */
   const logout = async () => {
-    await api.logout();
-    // 껍데기 캐시에 비밀이 있지는 않다. 다만 '나가면 아무것도 안 남는다' 는
-    // 이 도구의 약속이라, 지킬 수 있는 곳에서는 기계적으로 지킨다.
-    purgeServiceWorkerCaches();
-    setMe(null);
+    try {
+      await api.logout();
+    } catch (err) {
+      // 401 은 이미 서버에 세션이 없다는 뜻이니 로그아웃의 목적은 이미 달성됐다.
+      // 그 밖의 실패는 세션이 서버에 남아 있을 수 있어서 말해줘야 한다.
+      if (!(err instanceof ApiRequestError && err.status === 401)) {
+        notifications.show({ color: 'yellow', title: t('nav.logout'), message: t('err.logoutOffline') });
+      }
+    } finally {
+      // 껍데기 캐시에 비밀이 있지는 않다. 다만 '나가면 아무것도 안 남는다' 는
+      // 이 도구의 약속이라, 지킬 수 있는 곳에서는 기계적으로 지킨다.
+      purgeServiceWorkerCaches();
+      setMe(null);
+    }
   };
 
   // 배너가 뜨면 머리줄이 그만큼 두꺼워진다. 본문 여백이 같은 값을 써야 어긋나지 않는다.
