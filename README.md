@@ -162,7 +162,7 @@ overwrites `docs/findings.md` with the result. If this fails, the UI will fail t
 
 ---
 
-## Using it
+## How to use it
 
 ### Picking a log
 
@@ -201,15 +201,14 @@ Logs take about two minutes to reach storage, measured. Over a short range most 
 window is time that has not arrived yet, and an empty result is easy to mistake for a
 broken tool.
 
-- Adobe **keeps only seven days.** If your range falls outside that, it says so
-- Results stop at 200,000 lines. Narrow the range
-- Between midnight and 09:00 KST you need **the previous UTC file**. This is handled for you
+- Adobe **keeps only seven days**
+- Results stop at 200,000 lines. Narrow the range and search again
+- Between midnight and 09:00 KST you need **the previous UTC file**
 
-### Exporting a selection
+### Exporting selected logs
 
-Click a line to set the start, then **Shift + click** to set the end and select a range.
-This is the core interaction of the tool — instead of downloading a whole file, you look
-and take only what you need.
+Click the line you want to start from, then **Shift + click** to set the end and select
+a range.
 
 A bar appears below the selection. **Copy** goes to the clipboard (for Slack or an
 issue); **Export selection** writes a file.
@@ -221,13 +220,8 @@ issue); **Export selection** writes a file.
 | `csv` | ts, level, pod, thread, logger, message |
 
 The top of the file records **organization, environment, range, filters and requester**,
-so whoever receives it days later can tell where it came from. Masking is already applied.
-
-Export pulls from the **server ring buffer**, not from the screen. The screen only
-accumulates what passed the level filter, so lines the server has already dropped can
-linger on screen for a long time. When fewer lines will be written than you selected,
-the dialog **tells you how many before you download** — a file that silently disagrees
-with the screen is a problem days later, when you are using that file as evidence.
+and masking is already applied. When fewer lines will be written than you selected, the
+dialog tells you how many before you download.
 
 ---
 
@@ -269,11 +263,8 @@ between `Word/1.2.3.4` (a version) and `http://1.2.3.4` (a real address) is the 
 
 Both `/tail` and `/search` take up to four panes via **+ Add pane**.
 
-**A new pane is picked from within the environment you are already looking at** —
-publish next to author, dispatcher next to that. The reason to split panes is to follow
-one request across tiers of the same environment, so listing other environments here
-would only add noise (one real organization has 24 of them). Open a different
-environment from the environment list instead.
+**A new pane can only be picked from the environment you are already looking at.**
+Open a different environment from the environment list instead.
 
 In time-range search **all panes share the range** — the point of the comparison is "the
 same window in a different log," so a per-pane range would defeat it. Level and search
@@ -283,8 +274,6 @@ term stay per pane. Pressing `Search` runs every pane together.
 - Left/right vs top/bottom is chosen from the window width, and your own choice is remembered
 - **The URL is the view state.** `?p=org:env:service:log` maps to one pane, so a refresh
   or a shared link reopens the same combination
-- The limit of four exists because browsers pool roughly six connections per host. Each
-  pane holds one SSE connection open, so more panes would starve the other API calls
 
 ## In the viewer
 
@@ -304,10 +293,9 @@ browser across refreshes — but `seq` restarts at 0 for each server session, so
 the server does not light the stars back up. The saved lines themselves remain visible
 under "bookmarked only".
 
-## Alerts
+## Alerts (PWA)
 
-Register a pattern and the server keeps reading that log **even when nobody is watching**,
-and tells you when it matches.
+Register a pattern and the server keeps reading that log and tells you when it matches.
 
 `⋯` → **Create an alert from this** in a pane header opens the rules screen with the
 current target, search term and levels already filled in, so you do not pick the same
@@ -415,61 +403,27 @@ get their own banner.
 
 ## Access from outside
 
-The default `127.0.0.1` binding means it only opens on this machine. To reach it from
-elsewhere, pick one of three.
+The default `127.0.0.1` binding means it only opens on this machine.
 
 Think first about what this tool is holding — **client secrets** for several
 organizations, and **real end-user data** in prod logs. Wherever the sign-in screen is
 reachable is the exposure of that data.
 
-### 1. Your own devices only (recommended)
+### Your own devices only (recommended)
 
 Use a mesh VPN like Tailscale. No public IP, no port forwarding, no certificates, nothing
 exposed to the internet, and encryption at the network layer.
-
-```bash
-tailscale ip -4          # find the 100.x.x.x address
-```
 
 ```dotenv
 HOST=100.x.x.x
 ```
 
-Reach it from a phone or laptop at `http://100.x.x.x:7300`. Nothing else to do.
+Reach it from a phone or laptop at `http://100.x.x.x:7300`.
 
-### 2. The same office or home network
-
-```dotenv
-HOST=0.0.0.0
-```
-
-**Every device** on that network can see the sign-in screen. It is plaintext HTTP, so
-anyone watching packets on that network sees passwords and session cookies. Use it only
-on a network you trust.
-
-### 3. The internet (sharing with a team)
-
-Put a TLS-terminating reverse proxy (Caddy/nginx) in front, and:
-
-```dotenv
-HOST=127.0.0.1
-SESSION_COOKIE_SECURE=true
-TRUST_PROXY=true
-```
-
-Keep `127.0.0.1` so only the proxy reaches the app. Turn on `TRUST_PROXY=true` only if
-the proxy **overwrites** `X-Forwarded-For` — otherwise the header can be forged and the
-audit log's IP lies.
-
-In that case, also consider:
-
-- The login rate limit lives in process memory. It works for a single process, but
-  scaling to several instances defeats it
-- The minimum password length is 8 (`server/auth/password.ts`). Raise it if this is on
-  the internet
-- Whether the customer agreed to their prod logs leaving by this route
-
-If the binding is not loopback, the boot log prints what is open and what is missing.
+Opening it wider is not recommended. It is plaintext HTTP, so anyone watching packets on
+that network sees passwords and session cookies, and the login rate limit lives in
+process memory, so scaling to several instances defeats it. If the binding is not
+loopback, the boot log prints what is open and what is missing.
 
 ---
 
@@ -485,13 +439,7 @@ work.
 
 **https is required.** Service workers only run in a secure context, so outside
 `localhost` plaintext HTTP cannot install it (everything still works; it just will not
-open as an installed app). With Tailscale:
-
-```bash
-tailscale cert $(tailscale status --json | jq -r .Self.DNSName | sed 's/\.$//')
-```
-
-Then set `SESSION_COOKIE_SECURE=true`.
+open as an installed app). Attach a certificate, then set `SESSION_COOKIE_SECURE=true`.
 
 ### What ends up in the cache
 
@@ -519,7 +467,7 @@ If you want a login that never expires, rather than raising `SESSION_MAX_HOURS`,
 **dedicated kiosk account** and do not give it prod access. A permanently signed-in
 browser is a permanently valid credential.
 
-### What it survives on its own
+### What changes as an installed app
 
 - When the server restarts or a session is cleaned up for being idle, log `seq` restarts
   at 0. The screen notices the generation changed, drops what it had and refills — without
@@ -533,12 +481,12 @@ browser is a permanently valid credential.
 - Open streams recheck authorization every 15 seconds. Disabling an account or revoking
   org access cuts off panes that are already open. Alert rules recheck the same thing
   every minute
-- To have something watched while nobody is looking, set up an [alert](#alerts). To see it
+- To have something watched while nobody is looking, set up an [alert](#alerts-pwa). To see it
   even when the window is covered, turn on desktop notifications in the bell
 
-### What remains
+### What the logs leave behind
 
-Everyone walking past the screen is an audience. Masking catches IPs, emails, national ID
+Masking catches IPs, emails, national ID
 numbers, card numbers and Bearer tokens — but there are no rules for Korean mobile numbers,
 Korean names and addresses, JWTs without a prefix, or a customer's own identifiers. If
 this is going to stay up, fill in [`server/parse/mask.ts`](server/parse/mask.ts) for that
@@ -549,7 +497,7 @@ client secret in plaintext.
 
 ---
 
-## When something goes wrong
+## Troubleshooting
 
 **"Email or password is not correct" on the sign-in screen**
 `ADMIN_INITIAL_PASSWORD` is used **on first boot only.** Editing `.env` after the account
