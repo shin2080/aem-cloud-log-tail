@@ -24,10 +24,14 @@ export function Sparkline({
   entries,
   utc,
   onSeek,
+  canSeekAll = false,
 }: {
   entries: LogEntry[];
   utc: boolean;
-  onSeek?: (ts: number) => void;
+  /** 막대를 누르면. `all` 은 Shift 를 누른 채였다는 뜻이다 — 모든 창을 이 시각으로 */
+  onSeek?: (ts: number, all: boolean) => void;
+  /** 창이 둘 이상이라 '모든 창' 이 의미가 있을 때만 툴팁에 안내를 붙인다 */
+  canSeekAll?: boolean;
 }) {
   const t = useT();
   // 요약 그래프라 1초 늦어도 티가 안 난다. 배치마다 5만 건을 다시 세지 않는다.
@@ -67,9 +71,15 @@ export function Sparkline({
             .join(' · ');
 
         return (
-          <Tooltip key={b.t} label={label} withArrow openDelay={200} position="bottom">
+          <Tooltip
+            key={b.t}
+            label={canSeekAll && onSeek ? `${label}  ·  ${t('chart.seekAll')}` : label}
+            withArrow
+            openDelay={200}
+            position="bottom"
+          >
             <Box
-              onClick={() => onSeek?.(b.t)}
+              onClick={(e) => onSeek?.(b.t, e.shiftKey)}
               style={{
                 flex: 1,
                 minWidth: 2,

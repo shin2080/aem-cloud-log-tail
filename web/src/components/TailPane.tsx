@@ -69,6 +69,8 @@ export function TailPane({
   target,
   filter,
   onFilterChange,
+  sharedSeek,
+  onSeekAll,
   timeZone,
   fontSize,
   onClose,
@@ -77,6 +79,14 @@ export function TailPane({
   target: PaneTarget;
   filter: PaneFilter;
   onFilterChange: (next: PaneFilter) => void;
+  /**
+   * 다른 창에서 Shift+클릭한 시각. 창을 나눠 보는 이유가 '같은 요청이 계층을 어떻게
+   * 흘러갔나' 인데, 시각 이동이 창마다 따로 놀면 그 비교를 손으로 해야 했다.
+   * `n` 은 같은 시각을 두 번 눌러도 다시 움직이게 하는 일련번호다.
+   */
+  sharedSeek?: { ts: number; n: number } | null;
+  /** 이 창에서 Shift+클릭했을 때 모든 창으로 전파한다. 창이 하나면 넘기지 않는다 */
+  onSeekAll?: (ts: number) => void;
   timeZone: TimeZoneMode;
   fontSize: FontSize;
   onClose: () => void;
@@ -153,6 +163,12 @@ export function TailPane({
   }, [tail.entries, filterInput, highlight]);
 
   const view = useLogView(visible, paneKey(target));
+
+  // 다른 창에서 온 시각. 이 창에 그 시각 이후 줄이 없으면 뷰어가 조용히 넘긴다.
+  useEffect(() => {
+    if (sharedSeek) view.setSeekTs(sharedSeek.ts);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sharedSeek]);
 
   const isProd = envInfo?.environmentType === 'prod';
 
@@ -407,7 +423,14 @@ export function TailPane({
         </Group>
       )}
 
-      {view.showChart && <Sparkline entries={visible} utc={timeZone === 'UTC'} onSeek={view.setSeekTs} />}
+      {view.showChart && (
+        <Sparkline
+          entries={visible}
+          utc={timeZone === 'UTC'}
+          canSeekAll={onSeekAll !== undefined}
+          onSeek={(ts, all) => (all && onSeekAll ? onSeekAll(ts) : view.setSeekTs(ts))}
+        />
+      )}
 
       <Box style={{ flex: 1, minHeight: 0 }}>
         <LogViewer

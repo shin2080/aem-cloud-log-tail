@@ -207,6 +207,7 @@ export const ko = {
 
   /* ── 분포 그래프 ──────────────────────────────────────── */
   'chart.other': '기타',
+  'chart.seekAll': 'Shift+클릭: 모든 창을 이 시각으로',
 
   /* ── 복사 ─────────────────────────────────────────────── */
   'copy.blocked': '클립보드에 접근할 수 없다. 아래를 직접 복사한다.',
@@ -543,6 +544,7 @@ export const en: Record<StringKey, string> = {
 
   /* ── histogram ────────────────────────────────────────── */
   'chart.other': 'other',
+  'chart.seekAll': 'Shift+click: all panes to this time',
 
   /* ── clipboard ────────────────────────────────────────── */
   'copy.blocked': 'The clipboard is not available. Copy the text below by hand.',

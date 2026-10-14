@@ -29,6 +29,9 @@ export function TailPage() {
   const [timeZone, setTimeZone] = useState<TimeZoneMode>('KST');
   const [fontSize, setFontSize] = useFontSize();
   const [pickerOpen, setPickerOpen] = useState(false);
+  // 한 창에서 Shift+클릭한 시각을 모든 창에 전한다. 일련번호는 같은 시각 재클릭용이다.
+  const [sharedSeek, setSharedSeek] = useState<{ ts: number; n: number } | null>(null);
+  const seekAll = useCallback((ts: number) => setSharedSeek((s) => ({ ts, n: (s?.n ?? 0) + 1 })), []);
   // 고른 적 없으면 화면 폭으로 정한다. 와이드 모니터면 좌우, 좁으면 상하.
   const [direction, setDirection, isAuto] = useSplitDirection();
 
@@ -167,6 +170,8 @@ export function TailPage() {
             target={t}
             filter={filters[i] ?? DEFAULT_FILTER}
             onFilterChange={(f) => setPaneFilter(i, f)}
+            sharedSeek={sharedSeek}
+            onSeekAll={panes.length > 1 ? seekAll : undefined}
             timeZone={timeZone}
             fontSize={fontSize}
             closable={panes.length > 1}
