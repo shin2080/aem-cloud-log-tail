@@ -32,6 +32,22 @@ export function parsePane(s: string): PaneTarget | null {
   return { org, env, service, name };
 }
 
+/**
+ * 한 창의 필터. 창 대상과 나란히 URL 에 실린다.
+ *
+ * 예전에는 창 안의 useState 였다. 그러면 새로고침마다 WARN+ 로 돌아가고 검색어가
+ * 비는데, 서비스워커가 배포 뒤 자동 새로고침을 하므로 모니터에 걸어둔 화면은
+ * **배포할 때마다 필터를 잃었다.** "이 조건으로 봐" 링크도 못 넘겼다.
+ * README 가 'URL 이 곧 화면 상태' 라고 해놓고 대상만 그랬던 셈이다.
+ */
+export interface PaneFilter {
+  levels: LogLevel[];
+  query: string;
+  regex: boolean;
+}
+
+export const DEFAULT_FILTER: PaneFilter = { levels: ['ERROR', 'WARN'], query: '', regex: false };
+
 const ALL_LEVELS: LogLevel[] = ['ERROR', 'WARN', 'INFO', 'DEBUG', 'TRACE'];
 
 /** 빠르게 고르는 조합. 세밀하게 고르려면 드롭다운에서 체크박스를 쓴다. */
@@ -51,12 +67,16 @@ function levelLabel(levels: LogLevel[], t: TFunction): string {
 
 export function TailPane({
   target,
+  filter,
+  onFilterChange,
   timeZone,
   fontSize,
   onClose,
   closable,
 }: {
   target: PaneTarget;
+  filter: PaneFilter;
+  onFilterChange: (next: PaneFilter) => void;
   timeZone: TimeZoneMode;
   fontSize: FontSize;
   onClose: () => void;
@@ -64,9 +84,11 @@ export function TailPane({
 }) {
   const t = useT();
   const navigate = useNavigate();
-  const [levels, setLevels] = useState<LogLevel[]>(['ERROR', 'WARN']); // 기본은 WARN+
-  const [query, setQuery] = useState('');
-  const [useRegex, setUseRegex] = useState(false);
+  // 필터의 주인은 TailPage(URL) 다. 여기서는 읽고, 바꿀 때는 위로 올린다.
+  const { levels, query, regex: useRegex } = filter;
+  const setLevels = (next: LogLevel[]) => onFilterChange({ ...filter, levels: next });
+  const setQuery = (next: string) => onFilterChange({ ...filter, query: next });
+  const setUseRegex = (next: boolean) => onFilterChange({ ...filter, regex: next });
   const [envInfo, setEnvInfo] = useState<EnvironmentSummary | null>(null);
   const [exportOpen, setExportOpen] = useState(false);
 
@@ -218,7 +240,7 @@ export function TailPane({
             color="gray"
             aria-label={t('pane.regexFilterAria')}
             aria-pressed={useRegex}
-            onClick={() => setUseRegex((v) => !v)}
+            onClick={() => setUseRegex(!useRegex)}
           >
             .*
           </Button>

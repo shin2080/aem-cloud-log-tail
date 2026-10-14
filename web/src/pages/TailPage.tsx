@@ -3,7 +3,15 @@ import { Alert, Box, Button, Group, SegmentedControl, Text, Tooltip } from '@man
 import { useSearchParams } from 'react-router-dom';
 import { FontSizeControl, useFontSize } from '../components/FontSizeControl';
 import type { TimeZoneMode } from '../components/LogLine';
-import { TailPane, paneKey, parsePane, type PaneTarget } from '../components/TailPane';
+import type { LogLevel } from '@shared/types';
+import {
+  TailPane,
+  DEFAULT_FILTER,
+  paneKey,
+  parsePane,
+  type PaneFilter,
+  type PaneTarget,
+} from '../components/TailPane';
 import { PanePicker } from '../components/PanePicker';
 import { useSplitDirection } from '../components/useSplitDirection';
 import { useT } from '../i18n';
@@ -39,10 +47,38 @@ export function TailPage() {
     return org && env && service ? [{ org, env, service, name }] : [];
   }, [search]);
 
-  const setPanes = useCallback(
-    (next: PaneTarget[]) => {
+  /**
+   * 창마다의 필터. `p` 와 같은 순서로 `levels`·`q`·`re` 가 나란히 실린다.
+   *
+   * 없으면 기본(WARN+)이고, `levels=` 처럼 비어 있으면 '전체' 다 — 둘은 다르다.
+   * 필터 없는 옛 링크는 그대로 기본으로 열린다.
+   */
+  const filters = useMemo<PaneFilter[]>(() => {
+    const ls = search.getAll('levels');
+    const qs = search.getAll('q');
+    const res = search.getAll('re');
+    return panes.map((_, i) => ({
+      levels: ls[i] === undefined ? DEFAULT_FILTER.levels : (ls[i]!.split(',').filter(Boolean) as LogLevel[]),
+      query: qs[i] ?? '',
+      regex: res[i] === '1',
+    }));
+  }, [search, panes]);
+
+  const write = useCallback(
+    (nextPanes: PaneTarget[], nextFilters: PaneFilter[]) => {
+      const kept = nextPanes.slice(0, MAX_PANES);
       const p = new URLSearchParams();
-      for (const t of next.slice(0, MAX_PANES)) p.append('p', paneKey(t));
+      for (const t of kept) p.append('p', paneKey(t));
+      // 하나라도 기본값이 아니면 전부 싣는다. 일부만 실으면 자리가 어긋나
+      // 어느 창의 필터인지 알 수 없다. 전부 기본이면 아무것도 안 실어 URL 을 짧게 둔다.
+      if (kept.some((_, i) => !isDefaultFilter(nextFilters[i] ?? DEFAULT_FILTER))) {
+        kept.forEach((_, i) => {
+          const f = nextFilters[i] ?? DEFAULT_FILTER;
+          p.append('levels', f.levels.join(','));
+          p.append('q', f.query);
+          p.append('re', f.regex ? '1' : '0');
+        });
+      }
       setSearch(p, { replace: true });
     },
     [setSearch],
@@ -51,10 +87,20 @@ export function TailPage() {
   const addPane = (t: PaneTarget) => {
     // 같은 대상을 두 번 열면 서버 세션을 공유해 화면만 중복된다. 막는다.
     if (panes.some((x) => paneKey(x) === paneKey(t))) return;
-    setPanes([...panes, t]);
+    write([...panes, t], [...filters, DEFAULT_FILTER]);
   };
 
-  const closePane = (i: number) => setPanes(panes.filter((_, idx) => idx !== i));
+  const closePane = (i: number) =>
+    write(
+      panes.filter((_, idx) => idx !== i),
+      filters.filter((_, idx) => idx !== i),
+    );
+
+  const setPaneFilter = (i: number, f: PaneFilter) =>
+    write(
+      panes,
+      filters.map((x, idx) => (idx === i ? f : x)),
+    );
 
   // 첫 창이 '지금 보고 있는 환경' 이다. 창 추가는 이 환경 안에서만 고른다.
   const current = panes[0];
@@ -119,6 +165,8 @@ export function TailPage() {
           <TailPane
             key={paneKey(t)}
             target={t}
+            filter={filters[i] ?? DEFAULT_FILTER}
+            onFilterChange={(f) => setPaneFilter(i, f)}
             timeZone={timeZone}
             fontSize={fontSize}
             closable={panes.length > 1}
@@ -136,4 +184,11 @@ export function TailPage() {
       />
     </Box>
   );
+}
+
+function isDefaultFilter(f: PaneFilter): boolean {
+  const same =
+    f.levels.length === DEFAULT_FILTER.levels.length &&
+    [...f.levels].sort().join() === [...DEFAULT_FILTER.levels].sort().join();
+  return same && f.query === '' && !f.regex;
 }
