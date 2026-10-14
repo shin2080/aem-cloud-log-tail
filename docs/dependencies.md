@@ -1,61 +1,79 @@
-# 의존성과 그 이유
+# Dependencies, and why
 
-이 도구는 오래 유지보수할 개인 도구다. 의존성은 적을수록 좋다.
-새로 추가할 때는 여기에 한 줄로 이유를 남긴다.
+**English** · [한국어](dependencies.ko.md)
 
-## 런타임
+This is a personal tool meant to be maintained for a long time. Fewer dependencies is
+better. When adding one, leave a one-line reason here.
 
-| 패키지 | 이유 |
+## Runtime
+
+| Package | Why |
 |---|---|
-| `fastify` | HTTP 서버. SSE 를 쓰기 때문에 스트리밍 응답을 막지 않는 프레임워크가 필요했다 |
-| `@fastify/cookie` | 세션 쿠키 파싱·발급. SSE 에 쿠키가 자동으로 실리는 것이 WebSocket 대신 SSE 를 고른 이유다 |
-| `@fastify/static` | Vite 빌드 산출물을 같은 프로세스에서 서빙. 별도 웹서버를 띄우지 않기 위해 |
-| `better-sqlite3` | 동기 SQLite. 로컬 단일 프로세스라 비동기 드라이버의 복잡도가 필요 없다 |
-| `drizzle-orm` | 타입이 붙은 쿼리 빌더. 스키마 정의가 곧 타입이 된다 |
-| `zod` | `.env` 검증. 필수 값이 비면 부팅을 막기 위해 |
-| `dotenv` | `.env` 로딩 |
-| `@node-rs/argon2` | argon2id 비밀번호 해싱 (SPEC 지정) |
+| `fastify` | HTTP server. SSE is central here, so the framework must not get in the way of streaming responses |
+| `@fastify/cookie` | Session cookie parsing and issuing. Cookies riding along automatically on SSE is exactly why SSE was chosen over WebSocket |
+| `@fastify/static` | Serves the Vite build output from the same process, so there is no second web server to run |
+| `better-sqlite3` | Synchronous SQLite. A local single process does not need the complexity of an async driver |
+| `drizzle-orm` | Typed query builder. The schema definition is the type |
+| `zod` | `.env` validation, so a missing required value stops the boot |
+| `dotenv` | `.env` loading |
+| `@node-rs/argon2` | argon2id password hashing (specified by SPEC) |
 
-## 프론트엔드
+## Frontend
 
-| 패키지 | 이유 |
+| Package | Why |
 |---|---|
-| `react`, `react-dom` | (SPEC 지정) |
-| `react-router-dom` | `/tail/:sessionKey` 등 URL 로 화면 상태를 표현하기 위해 |
-| `@mantine/core`, `hooks`, `dates`, `notifications` | UI (SPEC 지정). `dates` 는 시간대 조회 화면의 DateTimePicker 용 |
-| `dayjs` | Mantine dates 의 필수 피어 |
-| `@tanstack/react-virtual` | 5만 라인 가상 스크롤. 가변 높이(스택트레이스 펼침) 때문에 `measureElement` 가 필요하다 |
-| `pretendard`, `@fontsource/jetbrains-mono` | 폰트 (SPEC 지정). 로컬 전용 도구라 CDN 대신 번들 |
+| `react`, `react-dom` | (specified by SPEC) |
+| `react-router-dom` | So view state lives in the URL (`/tail/:sessionKey` and friends) |
+| `@mantine/core`, `hooks`, `dates`, `notifications` | UI (specified by SPEC). `dates` is for the DateTimePicker on the time-range search screen |
+| `dayjs` | Required peer of Mantine dates |
+| `@tanstack/react-virtual` | Virtual scrolling for 50k lines. Variable row height (expanded stack traces) means `measureElement` is needed |
+| `pretendard`, `@fontsource/jetbrains-mono` | Fonts (specified by SPEC). Bundled rather than from a CDN, since this is a local-only tool |
 
-## 개발
+## Development
 
-| 패키지 | 이유 |
+| Package | Why |
 |---|---|
 | `typescript`, `@types/*` | |
-| `tsx` | 서버 개발 시 TS 직접 실행 + watch |
-| `vite`, `@vitejs/plugin-react` | 프론트 번들 |
+| `tsx` | Run TS directly with watch during server development |
+| `vite`, `@vitejs/plugin-react` | Frontend bundling |
 
-## SPEC 과 다르게 간 것
+## Where this departs from SPEC
 
-- **Fastify 4 → 5.** SPEC 은 4 를 지정했지만 4.x 에는 수정판이 5 에만 있는 high 등급 권고가 셋 있다
-  (`sendWebStream` 메모리, Content-Type 우회, `X-Forwarded-*` 스푸핑). Node 20+ 를 이미 요구하므로 5 로 올렸다.
-  `@fastify/cookie` 11, `@fastify/static` 10 이 여기에 맞물린다. 우리가 쓰는 API 는 차이가 없다.
-  `npm audit` 은 0건이다.
-- **`drizzle-kit` 을 쓰지 않는다.** 취약한 esbuild 를 끌고 오는 데다, 마이그레이션이 몇 개 안 되는 규모다.
-  `server/db/migrate.ts` 에 SQL 을 손으로 넣고 `_migrations` 테이블로 적용 여부를 관리한다.
-  스키마 타입은 `server/db/schema.ts` 의 Drizzle 정의가 담당한다 — 두 곳이 어긋나지 않게 같이 고친다.
+- **Fastify 4 → 5.** SPEC specified 4, but 4.x carries three high-severity advisories
+  whose fixes landed only in 5 (`sendWebStream` memory, Content-Type bypass,
+  `X-Forwarded-*` spoofing). Node 20+ was already required, so this moved to 5.
+  `@fastify/cookie` 11 and `@fastify/static` 10 follow from that. The APIs used here are
+  unchanged. `npm audit` reports zero.
+- **`drizzle-kit` is not used.** It pulls in a vulnerable esbuild, and there are only a
+  handful of migrations. SQL is written by hand in `server/db/migrate.ts`, with a
+  `_migrations` table tracking what has been applied. Schema types come from the Drizzle
+  definitions in `server/db/schema.ts` — change both together so they cannot drift apart.
 
-## Phase 3 에서 확인한 것
+## Confirmed in Phase 3
 
-- `@tanstack/react-virtual` 은 실제로 값을 했다. 5만 라인에서 DOM 노드 585개(렌더 행 53개),
-  점진 스크롤 프레임 중앙값 20ms(~50fps). 가상 스크롤 없이는 성립하지 않는 화면이다.
-- 새 의존성은 추가하지 않았다. gzip 해제(`node:zlib`)와 SSE 는 표준 라이브러리로 충분했다.
+- `@tanstack/react-virtual` earned its place. At 50k lines: 585 DOM nodes (53 rendered
+  rows), median incremental-scroll frame 20ms (~50fps). This screen does not exist
+  without virtual scrolling.
+- No new dependencies. gzip decompression (`node:zlib`) and SSE were covered by the
+  standard library.
 
 ## Phase 4
 
-새 의존성 없음. gzip 스트리밍 해제는 `node:zlib`, 스트림 변환은 `node:stream` 으로 충분했다.
-`@mantine/dates` 는 Phase 3 에서 이미 설치돼 있었고 여기서 `DateTimePicker` 로 처음 쓰였다.
+No new dependencies. Streaming gzip decompression used `node:zlib` and stream
+transformation `node:stream`. `@mantine/dates` was already installed in Phase 3 and was
+first actually used here, for `DateTimePicker`.
 
 ## Phase 5
 
-새 의존성 없음.
+No new dependencies.
+
+## Phase 6 (alerts, PWA)
+
+No new dependencies.
+
+- The service worker is hand-written rather than generated by Workbox. The common
+  `runtimeCaching` recipe would cache `/api/*` responses, which would put customer prod
+  logs on disk in plaintext — the one thing this tool's design forbids. See
+  `web/public/sw.js`.
+- PWA icons are generated by `scripts/make-icons.ts` using `node:zlib` to write the PNGs
+  directly. Adding an image library for two icons was not worth it.

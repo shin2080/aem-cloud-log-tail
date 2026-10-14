@@ -1,17 +1,19 @@
-# Phase 0 검증 결과
+# Phase 0 verification results
 
-- 실행 시각: 2026-08-28T14:53:41.844Z
-- 대상 조직: `acme` (ACME 코퍼레이션)
-- 표본 수: 8, 폴링 간격: 5000ms
+**English** · [한국어](findings.ko.md)
 
-## 0. IMS 토큰
+- Run at: 2026-08-28T14:53:41.844Z
+- Organization: `acme` (ACME Corporation)
+- Samples: 8, polling interval: 5000ms
 
-- OK. 발급 소요 285ms (토큰 값은 기록하지 않는다)
-- 프로그램 1개: 12345(Example-Program)
-- 환경 4개: 987654(example-dev/dev), 987655(example-rde/rde), 987656(example-stage/stage), 987657(example-prod/prod)
-- 대상: program=12345 environment=987654 (dev)
+## 0. IMS token
 
-## 5. `logs?days=1` 응답 스키마 실물
+- OK. Issued in 285ms (the token value is never recorded)
+- 1 program: 12345(Example-Program)
+- 4 environments: 987654(example-dev/dev), 987655(example-rde/rde), 987656(example-stage/stage), 987657(example-prod/prod)
+- Target: program=12345 environment=987654 (dev)
+
+## 5. Real response schema of `logs?days=1`
 
 ```json
 {
@@ -38,7 +40,7 @@
         "programId": "number",
         "environmentId": "number"
       },
-      "…(32건)"
+      "…(32 entries)"
     ]
   },
   "service": [],
@@ -47,7 +49,7 @@
 }
 ```
 
-파싱된 옵션:
+Parsed options:
 ```
   service=author name=aemaccess date=2026-08-28
   service=author name=aemaccess date=2026-08-27
@@ -83,182 +85,182 @@
   service=publish name=aemrequest date=2026-08-27
 ```
 
-선택: service=`author` name=`aemerror` date=`2026-08-28`
+Selected: service=`author` name=`aemerror` date=`2026-08-28`
 
-## 1. 302 Location 서명 URL 의 만료 시간
+## 1. Expiry of the 302 Location signed URL
 
-- URL 형태: `https://sa012345logshared0a1b2c3d.blob.core.windows.net/log-12345-987654/logs/gzip/author_aemerror_2026-08-28.log.gz?<api-version, se, sig, sp, sr, sv>`
-- 만료: 2026-08-29T14:53:50.000Z → 발급 시점 기준 **약 86400초 (1440.0분)**
-- → 재발급 임계값은 이 값의 80% 지점을 쓴다.
+- URL shape: `https://sa012345logshared0a1b2c3d.blob.core.windows.net/log-12345-987654/logs/gzip/author_aemerror_2026-08-28.log.gz?<api-version, se, sig, sp, sr, sv>`
+- Expires: 2026-08-29T14:53:50.000Z → **about 86400s (1440.0 min)** from issue
+- → Use 80% of that as the refresh threshold.
 
-## 2. 당일 파일이 gzip 인가 평문인가 ← 핵심
+## 2. Is the current day's file gzipped or plaintext ← the key question
 
-`logs?days=N` 응답에는 링크가 둘 있고 가리키는 파일이 다르다. 둘 다 본다.
+The `logs?days=N` response has two links pointing at different files. Check both.
 
 - download: `https://sa012345logshared0a1b2c3d.blob.core.windows.net/log-12345-987654/logs/gzip/author_aemerror_2026-08-28.log.gz?<api-version, se, sig, sp, sr, sv>`
 - tail:     `https://sa012345logshared0a1b2c3d.blob.core.windows.net/log-12345-987654/logs/author_aemerror_2026-08-28.log?<api-version, se, sig, sp, sr, sv>`
 
 - HTTP 206
 - `Content-Type`: application/octet-stream
-- `Content-Encoding`: (없음)
-- `Content-Range`: bytes 0-1023/8584150  → 전체 크기 8,584,150 bytes
-- 첫 2바이트: 1f 8b ← gzip 매직(1f 8b)
+- `Content-Encoding`: (none)
+- `Content-Range`: bytes 0-1023/8584150  → total size 8,584,150 bytes
+- First 2 bytes: 1f 8b ← gzip magic (1f 8b)
 
-### download 링크는 **gzip 이다**
+### The download link is **gzipped**
 
-이 파일은 Range 로 부분 디코딩이 안 되므로 실시간 tail 에 쓰지 않는다.
-하루치를 통째로 스트리밍하는 Phase 4 의 시간대 조회 전용이다.
-실시간 tail 은 아래 2b 의 평문 파일을 쓴다.
+Range requests cannot partially decode this file, so it is not used for live tail.
+It is only for Phase 4's time-range search, which streams a whole day.
+Live tail uses the plaintext file in 2b below.
 
-## 2b. tail 링크 — 실시간 tail 이 실제로 쓰는 파일
+## 2b. The tail link — the file live tail actually uses
 
 - HTTP 206, `Accept-Ranges`: bytes
-- 첫 3바이트: 32 38 2e 
-- 전체 크기: **183,247,656 bytes** (압축본 8,584,150 bytes 대비 21.3배)
+- First 3 bytes: 32 38 2e 
+- Total size: **183,247,656 bytes** (21.3× the 8,584,150-byte compressed copy)
 
-### 평문이다 ✅ SPEC 6.3 을 그대로 쓴다
+### It is plaintext ✅ SPEC 6.3 applies as written
 
-## 3. 서명 URL 의 Range 지원
+## 3. Range support on the signed URL
 
-- `Range: bytes=0-1023` → HTTP **206** (206 Partial Content — 지원)
+- `Range: bytes=0-1023` → HTTP **206** (206 Partial Content — supported)
 - `Accept-Ranges`: bytes
-- 꼬리 `Range: bytes=8580054-` → HTTP **206**, 4096 bytes 수신
-- 파일 끝 너머 `Range: bytes=8584150-` → HTTP **416** (416 — 새 데이터 없음 판정에 쓸 수 있다)
+- Tail `Range: bytes=8580054-` → HTTP **206**, 4096 bytes received
+- Past end of file `Range: bytes=8584150-` → HTTP **416** (usable as the "no new data" signal)
 
-## 4. 새 로그 반영 지연
+## 4. Delay before new logs appear
 
-평문 tail 파일의 끝을 5000ms 간격으로 8회 읽어, 새로 나타난 마지막 라인의 타임스탬프와 관측 시각의 차이를 잰다.
+Read the end of the plaintext tail file 8 times at 5000ms intervals and measure the gap between the newest line's timestamp and the observation time.
 
 ```
-  표본 1: 새 라인 없음
-  표본 2: 새 라인 없음
-  표본 3: 새 라인 없음
-  표본 4: 새 라인 없음
-  표본 5: 122.2초
-  표본 6: 새 라인 없음
-  표본 7: 새 라인 없음
-  표본 8: 새 라인 없음
+  sample 1: no new lines
+  sample 2: no new lines
+  sample 3: no new lines
+  sample 4: no new lines
+  sample 5: 122.2s
+  sample 6: no new lines
+  sample 7: no new lines
+  sample 8: no new lines
 ```
-- **중앙값 122.2초** (표본 1/8)
-- → 폴링 주기 5000ms 는 지연에 비해 과하다. 늘려도 된다.
+- **Median 122.2s** (1 of 8 samples)
+- → A 5000ms poll interval is excessive relative to that delay. It can be raised.
 
-## 결정이 필요한 사항
+## Decisions needed
 
 
-- [x] tail 전략: `logs/tail` 의 평문 파일에 Range 폴링 (Phase 0b 에서 확정)
-- [ ] 4번의 반영 지연 중앙값에 맞춰 `TAIL_POLL_INTERVAL_MS` 조정
+- [x] Tail strategy: Range polling against the plaintext file from `logs/tail` (settled in Phase 0b)
+- [ ] Tune `TAIL_POLL_INTERVAL_MS` to the median delay from section 4
 
 ---
 
-# 실트래픽 측정 (2026-08-28, dev / author / aemerror)
+# Measurements under real traffic (2026-08-28, dev / author / aemerror)
 
-트래픽을 흘리면서 잰 값이다. 이 셋이 `TAIL_POLL_INTERVAL_MS` 를 정했다.
+Measured while traffic was flowing. These three settled `TAIL_POLL_INTERVAL_MS`.
 
-## 1. 파서가 실환경에서 맞는가 → **맞는다**
+## 1. Does the parser hold against reality → **yes**
 
-꼬리 177줄을 SPEC 정규식에 넣었다.
-
-```
-SPEC 정규식 일치: 177/177 (100.0%)
-파서 레벨 분포: { INFO: 148, WARN: 28, ERROR: 1 }
-UNKNOWN 비율: 0.0%
-```
-
-SPEC 6.4 의 정규식이 실물과 정확히 맞는다. 파서는 고칠 게 없다.
-
-## 2. flush 주기 → **약 60초**
-
-3초 간격으로 4분간 파일 크기를 감시했다.
+Fed the last 177 lines to the SPEC regex.
 
 ```
-  + 12초    3,116 bytes
-  + 70초   42,386 bytes
-  +131초      232 bytes
-
-총 폴링 79회 중 데이터가 온 건 3회 (4%)
-flush 간격: 최소 58초 / 중앙값 61초 / 최대 61초
-flush 당 평균 15,245 bytes
+SPEC regex matches: 177/177 (100.0%)
+Parser level distribution: { INFO: 148, WARN: 28, ERROR: 1 }
+UNKNOWN ratio: 0.0%
 ```
 
-로그는 연속으로 흐르지 않는다. **약 60초마다 몰아서 blob 에 쓰인다.**
-간격이 58~61초로 매우 규칙적이다.
+The regex in SPEC 6.4 matches reality exactly. Nothing to fix in the parser.
 
-## 3. 반영 지연 → **약 120초**
+## 2. Flush interval → **about 60s**
 
-파일에 있는 가장 최근 엔트리의 시각과 관측 시각의 차이:
-
-```
-가장 최근 엔트리: 2026-08-28T14:53:14.107Z
-관측 시각:        2026-08-28T14:55:20.714Z
-차이: 126.6초
-```
-
-프로브의 표본 측정에서도 122.2초가 나왔다. 두 방법이 일치한다.
-
-**이건 Adobe 쪽 파이프라인 지연이라 폴링을 아무리 자주 해도 줄지 않는다.**
-
-## 결정: `TAIL_POLL_INTERVAL_MS` 5000 → **20000**
-
-- flush 가 60초 주기이므로 5초 폴링은 12번 중 11번이 416 이다
-- 20초면 flush 당 3회 확인한다. 감지 지연은 평균 10초 늘어나는데,
-  이미 120초 밀려 있는 값에 10초를 더하는 것이라 체감 차이가 없다
-- 요청 수는 4분의 1로 준다
-
-폴링은 Azure Blob 으로 직접 나가므로 Cloud Manager 레이트 리밋과는 무관하다.
-그래도 헛걸음을 12배 할 이유는 없다.
-
-## UI 에 반영한 것
-
-파이프라인 지연이 2분이라 방금 만든 에러가 화면에 없는 게 정상이다.
-그걸 모르면 도구가 고장난 줄 안다. 툴바에 **"최신 N초 전"** 을 띄우고,
-3분을 넘으면 노란색으로 바꿔 트래픽이 끊겼거나 파이프라인이 밀렸음을 알린다.
-
-## 아직 안 본 것
-
-- `preview_publish`, `publish` 는 이번 측정 구간에 트래픽이 없었다 (증가 0).
-  author 와 다른 특성이 있는지는 미확인.
-- Additional Publish Region 환경은 여전히 미확인.
-
-## 4. TailSession 을 실환경에 대고 돌린 결과
-
-프로덕션 코드 경로 그대로다.
+Watched the file size every 3 seconds for 4 minutes.
 
 ```
-start() 4533ms — 183MB 파일에서 256KB 만 읽었다 (offset 183,749,357)
-버퍼: 754건
-레벨 분포: { INFO: 646, WARN: 103, ERROR: 4, UNKNOWN: 1 }
-UNKNOWN: 1건 (0.1%)   ← 중간부터 읽어 첫 줄이 잘린 것. 정상
-스택트레이스가 묶인 엔트리: 2건 (가장 긴 것 7줄)
-마스킹된 엔트리: 11건
-가장 최근 엔트리: 173초 전
+  + 12s    3,116 bytes
+  + 70s   42,386 bytes
+  +131s      232 bytes
 
-폴링 1 (20초 후): +0건, offset 그대로      ← flush 사이 구간
-폴링 2 (20초 후): +3건, +759 bytes         ← flush 도착
-stop() 후 버퍼: 0건
+Data arrived on 3 of 79 polls (4%)
+Flush interval: min 58s / median 61s / max 61s
+Average 15,245 bytes per flush
 ```
 
-60초 flush 주기가 폴링 결과에 그대로 나타난다.
+Logs do not flow continuously. **They are written to the blob in bursts, roughly every 60 seconds.**
+The interval is very regular at 58–61s.
 
-## 5. 마스킹 오탐 — 실데이터에서 하나 잡혔다
+## 3. Propagation delay → **about 120s**
 
-1,134줄에 규칙을 걸어봤다.
+Gap between the newest entry in the file and the observation time:
 
-| 규칙 | 적중 | 판정 |
+```
+Newest entry:      2026-08-28T14:53:14.107Z
+Observed at:       2026-08-28T14:55:20.714Z
+Difference: 126.6s
+```
+
+The probe's sampled measurement also gave 122.2s. The two methods agree.
+
+**This is Adobe-side pipeline delay; polling more often does not reduce it.**
+
+## Decision: `TAIL_POLL_INTERVAL_MS` 5000 → **20000**
+
+- With a 60s flush cycle, 11 of every 12 five-second polls return 416
+- At 20s we check three times per flush. Detection latency grows by about 10s on average,
+  but adding 10s to something already 120s behind is not perceptible
+- Request count drops to a quarter
+
+Polling goes straight to Azure Blob, so it is unrelated to the Cloud Manager rate limit.
+Still, no reason to make twelve times as many wasted trips.
+
+## What this changed in the UI
+
+With a two-minute pipeline delay, an error you just triggered is legitimately absent from the screen.
+Without knowing that, it looks like the tool is broken. The toolbar shows **"newest N seconds ago"**,
+turning yellow past three minutes to signal that traffic stopped or the pipeline is behind.
+
+## Not yet examined
+
+- `preview_publish` and `publish` had no traffic during this window (zero growth).
+  Whether they behave differently from author is unconfirmed.
+- Additional Publish Region environments remain unexamined.
+
+## 4. Running TailSession against the real environment
+
+The production code path, unmodified.
+
+```
+start() 4533ms — read only 256KB out of a 183MB file (offset 183,749,357)
+buffer: 754 entries
+levels: { INFO: 646, WARN: 103, ERROR: 4, UNKNOWN: 1 }
+UNKNOWN: 1 (0.1%)    ← first line truncated by starting mid-file. Expected
+entries with folded stack traces: 2 (longest 7 lines)
+masked entries: 11
+newest entry: 173s ago
+
+poll 1 (+20s): +0 entries, offset unchanged  ← between flushes
+poll 2 (+20s): +3 entries, +759 bytes        ← a flush landed
+buffer after stop(): 0 entries
+```
+
+The 60-second flush cycle shows up directly in the polling results.
+
+## 5. A masking false positive — found in real data
+
+Ran the rules over 1,134 lines.
+
+| Rule | Hits | Verdict |
 |---|---|---|
-| `email` | 11줄 (1.0%) | 정상. `y***@example.com` — 실제 이메일이다 |
-| `credit-card` | 1줄 (0.1%) | **오탐** |
+| `email` | 11 lines (1.0%) | Correct. `y***@example.com` — a real email |
+| `credit-card` | 1 line (0.1%) | **false positive** |
 
-오탐 내용:
+The false positive:
 
 ```
 "type":"KEY_PHRASE","confidence":0.****-****-****-3973
 ```
 
-`"confidence":0.1234567890139730` 의 **소수부가 Luhn 을 통과해** 카드번호로 가려졌다.
-`\b` 는 소수점 뒤에서 경계가 서기 때문에 소수부가 독립된 숫자열로 잡힌다.
+In `"confidence":0.1234567890139730`, **the fractional part passed Luhn** and was redacted as a card number.
+`\b` sets a boundary after the decimal point, so the fraction is caught as a standalone digit run.
 
-합성 테스트에는 JSON 소수가 없어서 못 잡았다. 실데이터를 넣어보고서야 나왔다.
+The synthetic tests had no JSON decimals, so this only surfaced against real data.
 
-**고침**: 카드·주민번호 규칙 모두 앞뒤에 숫자·소수점·쉼표가 붙으면 건너뛰도록 했다
-(`(?<![\d.,])` / `(?![\d.,])`). 회귀 테스트 3건을 붙였고, 수정 후 재측정에서 오탐은 사라지고
-이메일 11건만 남았다.
+**Fix**: both the card and national-ID rules now skip when a digit, decimal point or comma is adjacent
+(`(?<![\d.,])` / `(?![\d.,])`). Three regression tests were added; after the fix the false positive is gone and
+only the 11 email hits remain.

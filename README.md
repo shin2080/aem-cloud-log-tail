@@ -1,415 +1,455 @@
 # AEM Cloud Log Viewer
 
+**English** · [한국어](README.ko.md)
+
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 ![Node](https://img.shields.io/badge/node-%E2%89%A520-brightgreen)
 
-로컬에서 돌리는 AEM as a Cloud Service 로그 뷰어.
+A locally run log viewer for AEM as a Cloud Service.
 
-여러 조직과 환경(dev/stage/prod)의 로그를 한 화면에서 실시간으로 따라가고,
-지난 시간대를 뒤지고, 필요한 구간만 골라 파일로 저장합니다.
+Follow logs from several organizations and environments (dev/stage/prod) live on one
+screen, dig through past time ranges, and save just the slice you need to a file.
 
-Adobe Cloud Manager 웹 UI 에서 로그를 보려면 다운로드 링크를 눌러 `.gz` 를 받고,
-풀고, 에디터로 여는 일을 반복해야 합니다. 이 도구는 그 사이를 없앱니다 —
-브라우저에서 바로 흘러가는 로그를 보고, 눈으로 고른 만큼만 집어갑니다.
+Reading logs in the Adobe Cloud Manager web UI means clicking a download link, getting
+a `.gz`, unpacking it, and opening it in an editor — over and over. This tool removes
+that round trip: watch the log stream in the browser and take only what you picked out
+by eye.
 
-> **Adobe 의 공식 도구가 아닙니다.** 개인이 만든 것이고 Adobe 와 무관합니다.
-> Cloud Manager API 를 **읽기만** 합니다.
+> **This is not an official Adobe tool.** It is a personal project, unaffiliated with
+> Adobe. It only **reads** from the Cloud Manager API.
 
-## 무엇을 하나
+## What it does
 
-- **실시간 tail** — 환경·서비스별 로그를 SSE 로 흘려 보여줍니다. 레벨 필터, 검색, 일시정지
-- **시간대 조회** — 지난 구간(최대 7일, Adobe 보존 한도)을 훑어 조건에 맞는 줄만 모읍니다
-- **창 나누기** — 같은 환경의 author·publish·dispatcher 를 최대 4개까지 나란히
-- **묶기** — 같은 예외 수백 건을 한 줄로 접습니다
-- **내보내기** — 선택한 구간만 log/json/csv 로. 출처가 파일 첫머리에 박힙니다
-- **알림** — 패턴을 등록해두면 아무도 안 보고 있어도 지켜보다 알려줍니다
-- **마스킹** — 이메일·토큰·카드번호·주민번호·공인 IP 를 버퍼에 들어가기 전에 가립니다
-- **계정과 감사 로그** — 조직·prod 접근을 계정별로 나눠 주고, 누가 무엇을 봤는지 남깁니다
-- **설치형(PWA)** — 창 장식 없이 띄워 모니터에 걸어둡니다
-- **한국어 / 영어**
+- **Live tail** — streams logs per environment and service over SSE. Level filter, search, pause
+- **Time-range search** — scans a past window (up to 7 days, Adobe's retention limit) and collects only the matching lines
+- **Split panes** — up to four side by side: author, publish, dispatcher of the same environment
+- **Grouping** — folds hundreds of identical exceptions into one line
+- **Export** — only the range you selected, as log/json/csv, with provenance stamped at the top of the file
+- **Alerts** — register a pattern and it keeps watching even when nobody is looking
+- **Masking** — emails, tokens, card numbers, national ID numbers and public IPs are redacted before they reach the buffer
+- **Accounts and an audit log** — org and prod access are granted per account, and who looked at what is recorded
+- **Installable (PWA)** — open it without browser chrome and leave it on a monitor
+- **Korean / English**
 
-### 지켜야 할 것
+### Rules this is built on
 
-이 도구는 **여러 조직의 client secret** 과 **prod 로그의 실사용자 데이터**를 다룹니다.
-설계가 그 위에서 정해졌고, 판단이 갈릴 때 여기로 돌아옵니다.
+This tool handles **client secrets for several organizations** and **real end-user data
+in prod logs**. The design follows from that, and these are what we come back to when a
+judgment call is close.
 
-1. **로그를 영구 저장하지 않습니다** — DB 에는 설정·계정·감사 기록만. 로그 본문은 메모리 링버퍼에만 있습니다
-2. **로컬 전용** — `127.0.0.1` 바인딩이 기본, DB 는 SQLite 파일 하나
-3. **읽기 전용** — Cloud Manager 쓰기 API 를 부르는 코드를 넣지 않습니다
-4. **자격증명은 `.env` 에만** — `clientSecret` 을 만지는 파일은 `server/config/env.ts` 와 `server/adobe/ims.ts` 둘뿐입니다
-5. **조직 경계는 서버에서 강제** — 프론트가 보내는 org 식별자를 믿지 않습니다
+1. **Logs are never persisted** — the DB holds config, accounts and audit records only. Log bodies live in an in-memory ring buffer
+2. **Local first** — binds `127.0.0.1` by default, and the DB is a single SQLite file
+3. **Read only** — no code that calls a Cloud Manager write API goes in here
+4. **Credentials live in `.env` only** — exactly two files touch `clientSecret`: `server/config/env.ts` and `server/adobe/ims.ts`
+5. **Org boundaries are enforced server-side** — the org identifier the frontend sends is never trusted
 
-설계 배경은 [SPEC.md](SPEC.md), 실환경 측정 결과는 [docs/findings.md](docs/findings.md) 에 있습니다.
+Design background is in [SPEC.md](SPEC.md) (Korean), and measurements against a real
+environment are in [docs/findings.md](docs/findings.md).
 
 ---
 
-## 요구 사항
+## Requirements
 
-- **Node.js 20 이상**
-- **Adobe Cloud Manager 접근 권한** — 아래 [자격증명 만들기](#adobe-자격증명-만들기) 참고
-- macOS / Linux / Windows. 빌드에 네이티브 모듈(`better-sqlite3`, `@node-rs/argon2`)이
-  섞여 있어 `npm install` 에 빌드 도구가 필요할 수 있습니다
+- **Node.js 20 or newer**
+- **Adobe Cloud Manager access** — see [Creating Adobe credentials](#creating-adobe-credentials) below
+- macOS / Linux / Windows. Native modules (`better-sqlite3`, `@node-rs/argon2`) are in
+  the dependency tree, so `npm install` may need build tooling
 
-## 빠른 시작
+## Quick start
 
 ```bash
-git clone <이 저장소>
+git clone <this repository>
 cd aem-cloud-log-tail
 npm install
 cp .env.example .env
 ```
 
-`.env` 를 열어 최소 세 가지를 채우세요.
+Open `.env` and fill in at least three things.
 
 ```bash
-openssl rand -hex 32     # 이 결과를 SESSION_SECRET 에
+openssl rand -hex 32     # put the result in SESSION_SECRET
 ```
 
-| 항목 | 값 |
+| Setting | Value |
 |---|---|
-| `SESSION_SECRET` | 위 명령 결과 |
-| `ADMIN_EMAIL`, `ADMIN_INITIAL_PASSWORD` | 최초 관리자 (비밀번호 8자 이상) |
-| `ORG_1_*` | 조직 하나 이상 — 다음 절에서 만듭니다 |
+| `SESSION_SECRET` | output of the command above |
+| `ADMIN_EMAIL`, `ADMIN_INITIAL_PASSWORD` | the first administrator (password at least 8 characters) |
+| `ORG_1_*` | at least one organization — created in the next section |
 
-그리고,
+Then:
 
 ```bash
 npm run build
 npm start
 ```
 
-http://127.0.0.1:7300 이 열립니다. 첫 부팅에 관리자 계정이 만들어지고 콘솔에 안내가 뜹니다.
-`ADMIN_EMAIL` 과 `ADMIN_INITIAL_PASSWORD` 로 로그인하면 **비밀번호 변경을 요구합니다.**
-바꾼 뒤 `.env` 의 `ADMIN_INITIAL_PASSWORD` 는 지우세요 — 그 값은 첫 부팅에만 쓰입니다.
+http://127.0.0.1:7300 opens. On first boot the administrator account is created and the
+console tells you so. Signing in with `ADMIN_EMAIL` and `ADMIN_INITIAL_PASSWORD`
+**forces a password change.** After that, delete `ADMIN_INITIAL_PASSWORD` from `.env` —
+it is only ever used on first boot.
 
-값이 빠졌거나 형식이 틀리면 **무엇이 왜 틀렸는지 알려주며 즉시 종료합니다.**
-반쯤 뜬 채로 나중에 실패하게 두지 않습니다.
+If a value is missing or malformed, the server **says what is wrong and why, then exits
+immediately.** It will not come up half-configured and fail later.
 
 ---
 
-## Adobe 자격증명 만들기
+## Creating Adobe credentials
 
-가장 많이 막히는 지점이라 따로 적습니다. 조직마다 한 번씩 합니다.
+This is where people get stuck most often, so it gets its own section. Do it once per
+organization.
 
-### 1. Developer Console 에서 프로젝트 만들기
+### 1. Create a project in the Developer Console
 
-1. [developer.adobe.com/console](https://developer.adobe.com/console) 에 로그인합니다.
-   **오른쪽 위에서 조직이 맞는지 확인하세요** — 조직이 여러 개면 여기서 자주 틀립니다.
+1. Sign in at [developer.adobe.com/console](https://developer.adobe.com/console).
+   **Check the organization in the top right** — if you belong to several, this is where
+   it usually goes wrong.
 2. **Create new project**
-3. **Add API** → **Cloud Manager** 를 고릅니다
-4. 인증 방식은 **OAuth Server-to-Server** 를 고릅니다
-   (JWT 는 2025년에 폐기됐습니다. 이 도구는 JWT 를 지원하지 않습니다)
+3. **Add API** → pick **Cloud Manager**
+4. For authentication pick **OAuth Server-to-Server**
+   (JWT was retired in 2025; this tool does not support it)
 
-### 2. 제품 프로필 고르기
+### 2. Pick a product profile
 
-API 를 붙이면 제품 프로필을 고르라고 합니다. **Cloud Manager - Developer**
-또는 그 이상(Deployment Manager, Business Owner)이면 됩니다.
-로그를 읽는 데 필요한 것은 다음 셋뿐이고, Developer 프로필이 다 가지고 있습니다.
+After adding the API you are asked to pick a product profile. **Cloud Manager -
+Developer** or anything above it (Deployment Manager, Business Owner) works. Reading
+logs needs only these three calls, and the Developer profile has all of them.
 
 ```
-GET /api/programs                                          프로그램 목록
-GET /api/program/{id}/environments                         환경 목록
-GET /api/program/{id}/environment/{id}/logs?days=N         로그 파일 목록과 링크
+GET /api/programs                                          list programs
+GET /api/program/{id}/environments                         list environments
+GET /api/program/{id}/environment/{id}/logs?days=N         log files and links
 ```
 
-**쓰기 권한은 필요 없습니다.** 배포·파이프라인을 건드리는 코드가 이 저장소에 없습니다.
+**No write permission is needed.** There is no code in this repository that touches
+deployments or pipelines.
 
-### 3. 값 네 개를 `.env` 로 옮기기
+### 3. Copy four values into `.env`
 
-프로젝트의 **Credentials → OAuth Server-to-Server** 화면에 있습니다.
+They are on the project's **Credentials → OAuth Server-to-Server** screen.
 
 ```dotenv
-ORG_1_KEY=acme                      # 내가 정하는 식별자. 아래 주의사항을 읽는다
-ORG_1_LABEL=ACME 코퍼레이션          # 화면에 보일 이름
-ORG_1_IMS_ORG_ID=XXXXXXXX@AdobeOrg  # Credential details 의 Organization ID
+ORG_1_KEY=acme                      # an identifier you choose. Read the warning below
+ORG_1_LABEL=ACME Corporation        # the name shown in the UI
+ORG_1_IMS_ORG_ID=XXXXXXXX@AdobeOrg  # Organization ID from Credential details
 ORG_1_CLIENT_ID=...                 # Client ID
 ORG_1_CLIENT_SECRET=...             # Client Secret (Retrieve client secret)
-ORG_1_SCOPES=openid,AdobeID,...     # 화면에 표시된 scope 문자열
+ORG_1_SCOPES=openid,AdobeID,...     # the scope string shown on screen
 ```
 
-`ORG_n_SCOPES` 는 **화면에 보이는 대로 복사합니다.** Developer Console 은
-`openid, AdobeID, read_organizations, ...` 처럼 쉼표 뒤에 공백을 넣어 보여주는데,
-IMS 는 그 공백을 거부합니다. 이 도구가 읽으면서 공백을 지우므로 그대로 붙여넣으면 됩니다.
+Copy `ORG_n_SCOPES` **exactly as displayed.** The Developer Console shows it as
+`openid, AdobeID, read_organizations, ...` with a space after each comma, and IMS
+rejects those spaces. This tool strips them while reading, so pasting as-is is fine.
 
-조직을 더 넣으려면 `ORG_2_*`, `ORG_3_*` 으로 잇습니다.
-`ORG_n_LABEL` 이 비면 거기서 스캔을 멈춥니다.
+To add more organizations, continue with `ORG_2_*`, `ORG_3_*`. Scanning stops at the
+first empty `ORG_n_LABEL`.
 
-> **`ORG_n_KEY` 는 한 번 정하면 바꾸지 않습니다.** 이 값이 DB 의 `user_orgs.org_key` 와
-> 조인됩니다. 바꾸면 기존 계정의 조직 접근 권한이 전부 끊깁니다.
-> 자격증명만 갈아끼우는 것도 위험합니다 — 캐시된 환경 목록이 옛 조직 것인데 호출은
-> 새 자격증명으로 나가 Adobe 가 403 을 줍니다. (지문을 남겨 자동으로 다시 받지만,
-> 되도록 키도 같이 바꿉니다.)
+> **Once you pick `ORG_n_KEY`, do not change it.** It joins against `user_orgs.org_key`
+> in the DB. Changing it severs every existing account's access to that organization.
+> Swapping only the credentials is risky too — the cached environment list still belongs
+> to the old organization while calls go out with the new credentials, and Adobe answers
+> 403. (A fingerprint is recorded so the cache refetches itself, but change the key as
+> well if you can.)
 
-### 4. 연결 확인하기
+### 4. Verify the connection
 
 ```bash
 npm run phase0 -- --org acme
 ```
 
-`--org` 는 `.env` 의 `ORG_n_KEY` 값입니다. 생략하면 첫 조직을 씁니다.
-토큰을 받고, 프로그램·환경을 훑고, 로그 링크를 확인한 결과를
-`docs/findings.md` 에 덮어씁니다. 여기서 실패하면 화면에서도 실패합니다.
+`--org` takes an `ORG_n_KEY` value from `.env`; omit it to use the first organization.
+It fetches a token, walks programs and environments, checks the log links, and
+overwrites `docs/findings.md` with the result. If this fails, the UI will fail too.
 
 ---
 
-## 쓰는 법
+## Using it
 
-### 로그 고르기
+### Picking a log
 
-로그인하면 **환경 목록**이 뜹니다. 조직이 여럿이면 위쪽 버튼으로 고릅니다.
+After signing in you get the **environment list**. If you have several organizations,
+switch between them with the buttons at the top.
 
-목록이 비어 있으면 **Cloud Manager 에서 새로고침**을 누르세요. 환경 목록은 30분 캐시됩니다 —
-매번 부르면 조직 하나 여는 데 수십 콜이 나가 레이트 리밋에 걸립니다.
+If the list is empty, press **Refresh from Cloud Manager**. The environment list is
+cached for 30 minutes — fetching it every time costs dozens of calls just to open one
+organization, which runs into rate limits.
 
-환경 행의 **서비스 확인**을 누르면 그 환경이 실제로 가진 로그가 나옵니다.
-로그 이름 버튼이 **실시간 tail**, 옆의 `⌕` 가 **시간대 조회**입니다.
+**Check services** on an environment row shows which logs that environment actually has.
+The log name button opens a **live tail**; the `⌕` next to it opens a **time-range
+search**.
 
-### 실시간 tail
+### Live tail
 
-- 헤더에서 **레벨**(ERROR / WARN+ / 전체 / 직접 고르기)과 **검색어**를 겁니다.
-  `.*` 를 켜면 검색어를 정규식으로 읽습니다
-- **일시정지**를 누르면 화면이 멈추고 그동안 온 건수가 버튼에 쌓입니다. 폴링은 계속 돕니다
-- 바닥에 붙어 있으면 새 로그를 따라가고, 위로 스크롤하면 멈추고
-  "새 로그 N건" 버튼이 뜹니다
-- 헤더 오른쪽 숫자는 버퍼에 든 줄 수, 그 옆은 **가장 최근 로그의 나이**입니다.
-  3분을 넘으면 색이 바뀝니다 — 트래픽이 없거나 파이프라인이 밀린 것입니다
+- Set the **level** (ERROR / WARN+ / all / pick your own) and a **search term** in the
+  header. Turn on `.*` to read the term as a regex
+- **Pause** freezes the view and counts what arrived on the button. Polling keeps running
+- While you are at the bottom it follows new lines; scroll up and it stops and shows a
+  "N new lines" button
+- The number on the right of the header is lines in the buffer; next to it is the **age
+  of the newest log**. Past three minutes it changes color — either there is no traffic
+  or the pipeline is behind
 
-로그는 **메모리에만** 있습니다. 세션당 20,000줄 / 32MB 링버퍼이고 넘치면 오래된 것부터
-밀려납니다. 밀려나면 화면이 알려줍니다. 붙잡아 두려면 북마크해 두세요.
+Logs live **in memory only**. The ring buffer holds 20,000 lines / 32MB per session, and
+anything beyond that is pushed out oldest-first. The UI tells you when that happens.
+Bookmark a line to hold on to it.
 
-### 시간대 조회
+### Time-range search
 
-위에서 구간을 고르고 **조회**를 누르세요. 프리셋은 5분 / 10분 / 30분 / 1시간 / 6시간 / 24시간.
+Pick a range at the top and press **Search**. Presets are 5min / 10min / 30min / 1h / 6h / 24h.
 
-**10분 이하를 고르면 "마지막 2분은 아직 비어 있을 수 있다"** 고 알려줍니다.
-로그가 스토리지에 도착하기까지 실측 2분쯤 걸립니다. 짧은 구간에서는 그 대부분이
-아직 안 온 시간이라, 결과가 비었을 때 도구가 고장난 줄로 오해하기 쉽습니다.
+**Picking 10 minutes or less warns you that "the last 2 minutes may still be empty."**
+Logs take about two minutes to reach storage, measured. Over a short range most of the
+window is time that has not arrived yet, and an empty result is easy to mistake for a
+broken tool.
 
-- Adobe 는 **7일치만 보관합니다.** 구간이 그 밖이면 그렇다고 말해줍니다
-- 결과가 200,000줄을 넘으면 멈춥니다. 구간을 좁혀 보세요
-- KST 새벽 0~9시는 **전날 UTC 파일**을 봐야 합니다. 이건 알아서 처리합니다
+- Adobe **keeps only seven days.** If your range falls outside that, it says so
+- Results stop at 200,000 lines. Narrow the range
+- Between midnight and 09:00 KST you need **the previous UTC file**. This is handled for you
 
-### 골라서 내보내기
+### Exporting a selection
 
-줄을 누르면 시작점이 잡히고, **Shift + 클릭**으로 끝을 잡으면 구간이 선택됩니다.
-이게 이 도구의 핵심 조작입니다 — 파일 전체를 받는 게 아니라 눈으로 보고 필요한 만큼만 집습니다.
+Click a line to set the start, then **Shift + click** to set the end and select a range.
+This is the core interaction of the tool — instead of downloading a whole file, you look
+and take only what you need.
 
-선택하면 아래에 바가 뜹니다. **복사**는 클립보드로 (슬랙·이슈에 붙일 때),
-**선택 구간 내보내기**는 파일로 나갑니다.
+A bar appears below the selection. **Copy** goes to the clipboard (for Slack or an
+issue); **Export selection** writes a file.
 
-| 포맷 | 내용 |
+| Format | Contents |
 |---|---|
-| `log` | 원본 라인 그대로 |
-| `json` | JSONL — 줄마다 `LogEntry` 하나 |
+| `log` | raw lines, as they came |
+| `json` | JSONL — one `LogEntry` per line |
 | `csv` | ts, level, pod, thread, logger, message |
 
-파일 첫머리에 **조직·환경·구간·필터·요청자**가 박힙니다. 며칠 뒤에 받은 사람도
-이게 어디서 나온 것인지 알 수 있습니다. 마스킹은 이미 적용된 상태로 나갑니다.
+The top of the file records **organization, environment, range, filters and requester**,
+so whoever receives it days later can tell where it came from. Masking is already applied.
 
-내보내기는 화면이 아니라 **서버 링버퍼**에서 뽑습니다. 화면은 레벨 필터를 통과한 것만
-쌓으므로 서버가 이미 버린 줄이 화면에는 한참 남아 있을 수 있습니다. 고른 것보다 적게
-나갈 상황이면 **내려받기 전에 몇 줄이 나가는지 먼저 알려줍니다** — 파일과 화면이
-말없이 어긋나면, 며칠 뒤 그 파일을 근거로 판단할 때 곤란해집니다.
+Export pulls from the **server ring buffer**, not from the screen. The screen only
+accumulates what passed the level filter, so lines the server has already dropped can
+linger on screen for a long time. When fewer lines will be written than you selected,
+the dialog **tells you how many before you download** — a file that silently disagrees
+with the screen is a problem days later, when you are using that file as evidence.
 
 ---
 
-## 지원하는 로그
+## Supported logs
 
-파서가 있는 것만 열립니다. 목록에도 열 수 있는 것만 나옵니다.
+Only logs with a parser can be opened, and only those appear in the list.
 
-| 서비스 | 로그 |
+| Service | Logs |
 |---|---|
 | author / publish | `aemerror` `aemaccess` `aemrequest` |
 | dispatcher | `aemdispatcher` `httpdaccess` `httpderror` |
 | cdn | `cdn` |
 
-`aemerror` 와 `httpderror` 는 **스택트레이스를 한 덩어리로 묶습니다.** 나머지는
-한 줄이 곧 한 건입니다. access 계열에는 레벨이 없어서 **HTTP 상태로 매깁니다** —
-5xx 는 ERROR, 4xx 는 WARN.
+`aemerror` and `httpderror` **fold stack traces into a single entry.** For the rest, one
+line is one entry. The access logs have no level, so one is **derived from the HTTP
+status** — 5xx is ERROR, 4xx is WARN.
 
-## 마스킹
+## Masking
 
-버퍼에 **들어가기 전에** 적용됩니다. 화면·내보내기·복사 어디로도 원본이 나가지 않습니다.
-`MASKING_ENABLED=false` 로 끌 수 있지만, prod 를 볼 거면 켜 두세요.
+Applied **before the buffer**. Nothing unredacted reaches the screen, an export or the
+clipboard. You can turn it off with `MASKING_ENABLED=false`, but leave it on if you are
+looking at prod.
 
-이메일 · Bearer 토큰 · Basic 인증 · 비밀번호류 쿼리 파라미터 · 카드번호 ·
-주민등록번호 · 공인 IP(사설 대역은 그대로 둡니다).
+Emails · Bearer tokens · Basic auth · password-ish query parameters · card numbers ·
+Korean national ID numbers · public IPs (private ranges are left alone).
 
-실제 로그로 맞추느라 오탐 방어가 몇 개 들어가 있습니다 — 13자리 epoch ms 를 주민번호로,
-JSON 소수를 카드번호로, `Chrome/152.0.0.0` 같은 브라우저 버전을 IP 로 읽던 것들입니다.
-마지막 것은 access 로그가 줄마다 UA 를 달고 오기 때문에 거의 모든 줄에 `masked` 배지가
-붙게 만들었습니다 — 배지가 의미를 잃으면 정작 진짜 개인정보가 가려진 줄을 못 알아봅니다.
+Several false-positive guards came out of real logs — 13-digit epoch milliseconds read
+as a national ID, a JSON decimal read as a card number, and a browser version like
+`Chrome/152.0.0.0` read as an IP. That last one put a `masked` badge on nearly every
+access line, because access logs carry a user agent on every line — and once the badge
+is meaningless, you stop noticing the lines where something real was redacted.
 
-규칙을 건드리면 `server/parse/mask.test.ts` 를 같이 보세요. 특히 `Word/1.2.3.4`(버전)와
-`http://1.2.3.4`(실주소)를 가르는 경계가 미묘합니다.
+If you touch the rules, read `server/parse/mask.test.ts` alongside them. The boundary
+between `Word/1.2.3.4` (a version) and `http://1.2.3.4` (a real address) is the subtle part.
 
 ---
 
-## 여러 환경 같이 보기
+## Watching several environments at once
 
-`/tail` 과 `/search` 모두 **+ 창 추가** 로 최대 4개까지 나란히 띄웁니다.
+Both `/tail` and `/search` take up to four panes via **+ Add pane**.
 
-**창 추가는 지금 보고 있는 환경 안에서만 고릅니다** — author 옆에 publish, 그 옆에
-dispatcher. 창을 나눠 보는 이유가 '같은 환경의 다른 계층에서 한 요청이 어떻게
-흘러갔나' 이므로, 여기서 다른 환경까지 늘어놓으면 고를 것만 많아집니다
-(환경이 24개인 조직이 실제로 있습니다). 다른 환경은 환경 선택 화면에서 새로 엽니다.
+**A new pane is picked from within the environment you are already looking at** —
+publish next to author, dispatcher next to that. The reason to split panes is to follow
+one request across tiers of the same environment, so listing other environments here
+would only add noise (one real organization has 24 of them). Open a different
+environment from the environment list instead.
 
-시간대 조회에서는 **구간을 모든 창이 공유합니다** — 비교의 요점이 '같은 시간대의
-다른 로그' 이므로 창마다 구간이 다르면 나란히 놓는 의미가 없습니다.
-레벨·검색어는 창마다 따로 둡니다. `조회` 를 누르면 모든 창이 함께 돕니다.
+In time-range search **all panes share the range** — the point of the comparison is "the
+same window in a different log," so a per-pane range would defeat it. Level and search
+term stay per pane. Pressing `Search` runs every pane together.
 
-- 창마다 **레벨·검색·일시정지가 따로** 동작합니다. 글자 크기와 타임존만 공유합니다
-- 화면 폭에 따라 좌우/상하를 자동으로 고르고, 직접 고르면 그 선택을 기억합니다
-- **URL 이 곧 화면 상태입니다.** `?p=org:env:service:log` 가 창 하나에 대응하므로
-  새로고침하거나 링크를 넘겨도 같은 조합이 열립니다
-- 4개로 제한한 이유는 브라우저가 같은 호스트로 가는 연결을 6개쯤으로 묶기 때문입니다.
-  창 하나가 SSE 연결 하나를 계속 물고 있어서, 더 열면 나머지 API 호출이 굶습니다
+- **Level, search and pause are per pane.** Only font size and time zone are shared
+- Left/right vs top/bottom is chosen from the window width, and your own choice is remembered
+- **The URL is the view state.** `?p=org:env:service:log` maps to one pane, so a refresh
+  or a shared link reopens the same combination
+- The limit of four exists because browsers pool roughly six connections per host. Each
+  pane holds one SSE connection open, so more panes would starve the other API calls
 
-## 뷰어에서 쓸 수 있는 것
+## In the viewer
 
-- **묶기** — 같은 사건을 하나로 접고 `×N` 을 붙입니다. 숫자·UUID 가 달라도 같은 것으로 봅니다.
-  같은 예외가 수백 번 반복될 때 화면을 되찾아 줍니다
-- **★ 북마크** — 표시해둔 줄은 링버퍼에서 밀려나도 남습니다. 로그가 메모리에만 있으므로
-  중요한 줄을 붙잡아 두려면 이게 필요합니다
-- **시간축 분포** — 버퍼 전체의 레벨별 분포. 막대를 누르면 그 시각으로 이동합니다.
-  스크롤로 훑는 것보다 '언제 터졌나' 를 훨씬 빨리 찾습니다
-- **필터 저장** — 자주 쓰는 레벨·검색어 조합을 이름 붙여 둡니다. tail 과 조회 양쪽에서 씁니다
+- **Grouping** — folds identical events into one line with `×N`. Differing numbers and
+  UUIDs still count as the same event. It gives the screen back when one exception
+  repeats hundreds of times
+- **★ Bookmark** — a marked line survives being pushed out of the ring buffer. Since logs
+  live only in memory, this is how you hold on to something
+- **Time histogram** — level distribution across the whole buffer. Click a bar to jump to
+  that moment; it finds "when did it break" far faster than scrolling
+- **Saved filters** — name a level/search combination you use often. Works in both tail
+  and search
 
-묶기·북마크·분포는 창 헤더의 `⋯` 메뉴에 있습니다. 헤더가 좁아 자주 쓰는 것만 밖에 뒀습니다.
-북마크는 브라우저에 남으므로 새로고침해도 유지됩니다 — 다만 `seq` 는 서버 세션마다
-0부터 다시 매겨져서, 서버를 재시작하면 별이 다시 켜지지는 않습니다.
-저장해둔 줄 자체는 '북마크만 보기' 로 계속 볼 수 있습니다.
+Grouping, bookmarks and the histogram live in the `⋯` menu of the pane header; the header
+is narrow, so only the frequently used controls stay outside. Bookmarks persist in the
+browser across refreshes — but `seq` restarts at 0 for each server session, so restarting
+the server does not light the stars back up. The saved lines themselves remain visible
+under "bookmarked only".
 
-## 알림
+## Alerts
 
-패턴을 등록해두면 **아무도 보고 있지 않아도** 서버가 그 로그를 계속 읽다가 알려줍니다.
+Register a pattern and the server keeps reading that log **even when nobody is watching**,
+and tells you when it matches.
 
-창 헤더의 `⋯` → **이 조건으로 알림 만들기** 를 누르면 지금 보고 있는 대상·검색어·레벨이
-그대로 실려 규칙 화면이 열립니다. 조건을 다시 고르게 하지 않으려는 것입니다.
+`⋯` → **Create an alert from this** in a pane header opens the rules screen with the
+current target, search term and levels already filled in, so you do not pick the same
+conditions twice.
 
 | | |
 |---|---|
-| **찾을 것** | 기본은 부분문자열. 정규식은 옵션입니다 |
-| **레벨** | 고른 레벨만 봅니다. 비우면 전체 |
-| **같은 사건 다시 알리기** | 이 시간 안에 같은 사건이 또 오면 새 알림 대신 건수만 올립니다 |
+| **Look for** | a plain substring by default; regex is opt-in |
+| **Levels** | only the levels you pick. Empty means all |
+| **Re-alert the same event after** | within this window a repeat bumps the count instead of creating a new alert |
 
-받는 곳은 두 군데입니다. 머리줄의 **벨**(안 읽은 수가 배지로 뜨고, 누르면 알림함),
-그리고 벨 안에서 켜는 **데스크톱 알림**(OS 토스트). 토스트는 창이 다른 것에 가려
-있을 때를 위한 것입니다 — 모니터에 띄워둔 화면이 뒤에 있으면 배지가 바뀌어도 아무도 못 봅니다.
+Alerts arrive in two places: the **bell** in the header (unread count as a badge, click
+for the inbox), and **desktop notifications** (OS toasts) which you enable inside the
+bell. Toasts exist for when the window is behind something else — if the screen on your
+monitor is covered, a changing badge reaches nobody.
 
-알림을 누르면 그 로그 창의 **그 자리**로 데려갑니다.
+Clicking an alert takes you to **that spot** in that log pane.
 
-### 알아둘 것
+### Things to know
 
-**알림은 2~3분 늦습니다.** AEM 이 로그를 스토리지로 흘리는 데 2분쯤, 폴링이 20초입니다.
-이건 고칠 수 있는 종류가 아니라서 알림함에도 적어뒀습니다.
+**Alerts are 2–3 minutes late.** AEM takes about two minutes to flush logs to storage,
+and polling is every 20 seconds. This is not the kind of thing that can be fixed, so the
+inbox says it too.
 
-**대상 수에 상한이 있습니다** (`ALERT_MAX_TARGETS`, 기본 3). 규칙이 걸린
-환경×서비스×로그 하나가 곧 '아무도 안 봐도 도는 폴링 루프 + 링버퍼' 입니다.
-이 값 × `TAIL_BUFFER_MAX_BYTES` 가 알림 때문에 상시 점유되는 메모리입니다.
-상한을 넘기면 규칙을 만들 때 거절합니다 — 만들고 나서 조용히 안 도는 것보다 낫습니다.
+**There is a cap on targets** (`ALERT_MAX_TARGETS`, default 3). One
+environment × service × log with a rule on it is a polling loop plus a ring buffer that
+runs whether or not anyone is looking. That value × `TAIL_BUFFER_MAX_BYTES` is the memory
+alerts hold permanently. Going over the cap is refused when you create the rule — better
+than a rule that exists but quietly never runs.
 
-**규칙이 스스로 꺼지면 이유가 남습니다.** 권한이 회수됐거나(1분마다 다시 봅니다),
-대상 상한을 넘었거나, 패턴이 위험한 경우입니다. 규칙 화면에 그 이유가 배지로 붙습니다.
-조용히 꺼지면 알림이 안 오는 것 자체를 알 수 없습니다.
+**When a rule turns itself off, it says why.** Access was revoked (rechecked every
+minute), the target cap was exceeded, or the pattern is unsafe. The reason shows as a
+badge on the rules screen. A rule that goes quiet without explanation means you cannot
+even tell that alerts stopped.
 
-**정규식은 서버에서 돕니다.** 화면에서 돌 때는 자기 탭만 멈췄지만 이제는 못된 패턴 하나가
-모든 세션의 폴링을 막습니다. 그래서 기본이 부분문자열이고, 정규식은 등록할 때
-중첩 수량자 `(a+)+` 같은 모양을 거부하며 훑는 줄 길이도 자릅니다.
+**Regexes run on the server.** On the client a bad pattern froze only your own tab; here
+one can block polling for every session. So the default is a plain substring, and regexes
+are rejected at registration if they have shapes like the nested quantifier `(a+)+`. The
+scanned line length is capped too.
 
-**알림 기록에 로그 본문은 남지 않습니다.** `alert_hits` 에는 규칙·시각·건수·`seq` 만 있습니다.
-같은 사건인지 가르는 지문도 해시로 넣습니다 — 원문을 넣으면 정규화된 로그 메시지가
-읽을 수 있는 채로 DB 에 남습니다. OS 토스트에도 규칙 이름과 어느 로그인지, 몇 건인지까지만
-싣습니다. 토스트는 잠금화면과 알림센터에 남고 화면 공유 중에도 뜹니다.
+**Alert records contain no log text.** `alert_hits` holds the rule, time, count and `seq`.
+Even the fingerprint used to tell events apart is hashed — storing it raw would leave a
+normalized log message readable in the DB. OS toasts carry only the rule name, which log,
+and how many. Toasts persist on lock screens and in notification centers, and show up
+during screen sharing.
 
-밀려나서 `seq` 가 가리키는 자리가 비었으면 시간대 조회에서 찾습니다.
-
----
-
-## 한국어 / 영어
-
-화면 오른쪽 위 계정 메뉴, 그리고 로그인 화면에서 바꿉니다. 로그인 전에도 바꿀 수
-있어야 해서 두 곳에 둡니다 — 화면이 읽히지 않는 사람이 메뉴에 들어갈 수는 없습니다.
-
-처음 열 때는 브라우저 설정을 따르고(한국어가 아니면 영어), 한 번 고르면
-그 브라우저에 기억합니다. `<html lang>` 도 함께 바꿉니다.
-
-**서버 오류 메시지도 같이 옮깁니다.** 요청마다 `X-Lang` 을 실어 보내고 서버가
-그 말로 만들어 돌려줍니다. 헤더가 없으면 한국어입니다 — curl 로 두드릴 때 지금까지와
-같습니다. 서버 콘솔과 감사 기록은 옮기지 않습니다. 그쪽은 서버를 돌리는 사람이 보는
-것이라 언어를 섞을 이유가 없습니다.
-
-로그 내용 자체는 옮기지 않습니다. 그건 AEM 이 쓴 글입니다.
+If the line a `seq` points at has already been pushed out, find it with time-range search.
 
 ---
 
-## 계정 운영
+## Korean / English
 
-계정은 관리자가 발급합니다. **회원가입 엔드포인트는 없습니다.**
+Switch in the account menu at the top right, and on the sign-in screen. It is in both
+places because you must be able to switch before signing in — someone who cannot read
+the screen cannot get into the menu.
 
-- 우상단 계정 메뉴 → **계정 관리** / **감사 로그** (admin 만 보입니다)
-- 계정을 발급하면 **임시 비밀번호가 화면에 한 번만** 나옵니다. 서버에 저장되지 않으니
-  그 자리에서 전달하세요. 잃어버리면 '비번 초기화' 로 다시 발급하면 됩니다
-- 조직 접근과 **prod 열람은 따로 줍니다.** prod 로그에는 실사용자 데이터가 섞입니다.
-  prod 권한이 없으면 환경 목록에서 prod 가 아예 빠지고, ID 를 직접 넣어도 404 다
-- 권한을 줄이면 그 계정의 **기존 세션이 즉시 끊깁니다**
+The first visit follows the browser setting (English unless the browser is Korean), and
+your choice is remembered in that browser. `<html lang>` changes with it.
 
-되돌릴 수 없는 실수는 서버가 막습니다 — 자기 계정 비활성화·강등·삭제, 마지막 관리자 제거.
+**Server error messages are translated too.** Every request carries `X-Lang` and the
+server builds the message in that language. Without the header it answers in Korean, so
+poking at it with curl behaves as it always has. The server console and the audit log are
+not translated — those are read by whoever runs the server, and there is no reason to mix
+languages there.
 
-감사 로그는 **조회만 됩니다.** 삭제 API 를 만들지 않았습니다. 다만 무한히 쌓이게 두지는 않습니다.
-`AUDIT_RETENTION_DAYS`(기본 365일)가 지난 기록은 부팅 때와 하루 주기로 정리합니다.
-0으로 두면 영구 보관합니다. 누가 흔적을 지우지 못하게 하는 것이 목적이므로
-나이만 보고 기계적으로 정리하는 경로만 둡니다.
-
-## 조직을 추가할 때
-
-`.env` 에 `ORG_n_*` 를 넣는 것만으로는 화면에 안 나옵니다. 두 가지가 더 필요합니다.
-
-1. **서버 재시작.** `tsx watch` 는 `server/` 만 감시하고 `.env` 는 안 봅니다.
-   부팅 로그의 `조직 N개 로드` 로 확인하세요
-2. **계정에 권한 부여.** `/api/orgs` 는 `.env` 가 아니라 계정의 접근 권한을 기준으로 줍니다.
-   최초 관리자 시딩은 계정을 만들 때 한 번만 조직을 붙이므로, 나중에 추가한 조직은
-   **계정 관리에서 직접 체크해야 합니다**
-
-환경 선택 화면이 이 두 상태를 알려줍니다 — `.env` 에는 있는데 권한이 없는 조직,
-권한은 있는데 `.env` 에서 사라진 조직을 각각 배너로 띄웁니다.
+Log content itself is never translated. That text was written by AEM.
 
 ---
 
-## 외부 접근
+## Running accounts
 
-기본은 `127.0.0.1` 바인딩이라 이 기기에서만 열립니다. 밖에서 쓰려면 셋 중 하나를 고릅니다.
+Accounts are issued by an administrator. **There is no sign-up endpoint.**
 
-이 도구가 무엇을 들고 있는지 먼저 생각합니다 — 여러 조직의 **client secret**, 그리고
-prod 로그의 **실사용자 데이터**입니다. 로그인 화면이 열리는 범위가 곧 그 데이터의 노출 범위입니다.
+- Account menu, top right → **Users** / **Audit log** (visible to admins only)
+- Issuing an account shows a **temporary password once, on screen**. It is not stored on
+  the server, so hand it over right then. If it is lost, issue a new one with "reset password"
+- Org access and **prod access are granted separately.** Prod logs carry real end-user
+  data. Without prod access, prod environments disappear from the list entirely, and
+  passing the ID directly returns 404
+- Reducing someone's access **terminates their existing sessions immediately**
 
-### 1. 본인 기기에서만 (권장)
+The server blocks mistakes you cannot undo — deactivating, demoting or deleting your own
+account, and removing the last administrator.
 
-Tailscale 같은 메시 VPN 을 쓰세요. 공인 IP·포트포워딩·인증서가 필요 없고, 인터넷에는
-아무것도 노출되지 않으며, 네트워크 계층에서 암호화됩니다.
+The audit log is **read-only.** No delete API was written. It is not left to grow without
+bound either: records older than `AUDIT_RETENTION_DAYS` (default 365) are cleaned up at
+boot and once a day. Set it to 0 to keep them forever. The point is that nobody can erase
+their traces, so the only path that removes anything goes purely by age.
+
+## Adding an organization
+
+Putting `ORG_n_*` in `.env` is not enough for it to appear. Two more things are needed.
+
+1. **Restart the server.** `tsx watch` only watches `server/`, not `.env`. Confirm with
+   `N organizations loaded` in the boot log
+2. **Grant it to an account.** `/api/orgs` answers from account access, not from `.env`.
+   The initial admin seeding attaches organizations once, when the account is created, so
+   an organization added later **has to be checked on in Users**
+
+The environment list surfaces both of these states — organizations that are in `.env` but
+not granted, and organizations that are granted but have disappeared from `.env`, each
+get their own banner.
+
+---
+
+## Access from outside
+
+The default `127.0.0.1` binding means it only opens on this machine. To reach it from
+elsewhere, pick one of three.
+
+Think first about what this tool is holding — **client secrets** for several
+organizations, and **real end-user data** in prod logs. Wherever the sign-in screen is
+reachable is the exposure of that data.
+
+### 1. Your own devices only (recommended)
+
+Use a mesh VPN like Tailscale. No public IP, no port forwarding, no certificates, nothing
+exposed to the internet, and encryption at the network layer.
 
 ```bash
-tailscale ip -4          # 100.x.x.x 확인
+tailscale ip -4          # find the 100.x.x.x address
 ```
 
 ```dotenv
 HOST=100.x.x.x
 ```
 
-폰·노트북에서 `http://100.x.x.x:7300` 으로 붙습니다. 추가로 할 일이 없습니다.
+Reach it from a phone or laptop at `http://100.x.x.x:7300`. Nothing else to do.
 
-### 2. 같은 사무실/집 네트워크
+### 2. The same office or home network
 
 ```dotenv
 HOST=0.0.0.0
 ```
 
-그 네트워크의 **모든 기기**가 로그인 화면을 볼 수 있습니다. 평문 HTTP 라 같은 망에서
-패킷을 보면 비밀번호와 세션 쿠키가 그대로 보입니다. 신뢰할 수 있는 망에서만 쓰세요.
+**Every device** on that network can see the sign-in screen. It is plaintext HTTP, so
+anyone watching packets on that network sees passwords and session cookies. Use it only
+on a network you trust.
 
-### 3. 인터넷 (팀 공유)
+### 3. The internet (sharing with a team)
 
-앞단에 TLS 를 끝내는 리버스 프록시(Caddy/nginx)를 두고:
+Put a TLS-terminating reverse proxy (Caddy/nginx) in front, and:
 
 ```dotenv
 HOST=127.0.0.1
@@ -417,223 +457,239 @@ SESSION_COOKIE_SECURE=true
 TRUST_PROXY=true
 ```
 
-프록시만 앱에 접근하도록 `127.0.0.1` 을 유지합니다. `TRUST_PROXY=true` 는 프록시가
-`X-Forwarded-For` 를 **덮어쓰는** 경우에만 켭니다 — 그러지 않으면 헤더를 조작해
-감사 기록의 IP 를 속일 수 있습니다.
+Keep `127.0.0.1` so only the proxy reaches the app. Turn on `TRUST_PROXY=true` only if
+the proxy **overwrites** `X-Forwarded-For` — otherwise the header can be forged and the
+audit log's IP lies.
 
-이 경우 다음도 함께 검토합니다:
+In that case, also consider:
 
-- 로그인 실패 제한은 프로세스 메모리에 있습니다. 단일 프로세스면 동작하지만,
-  여러 인스턴스로 늘리면 무력화됩니다
-- 비밀번호 최소 길이가 8자입니다 (`server/auth/password.ts`). 인터넷에 열 거면 올리세요
-- 고객사가 자기 prod 로그를 이 경로로 내보내는 데 동의했는지 확인하세요
+- The login rate limit lives in process memory. It works for a single process, but
+  scaling to several instances defeats it
+- The minimum password length is 8 (`server/auth/password.ts`). Raise it if this is on
+  the internet
+- Whether the customer agreed to their prod logs leaving by this route
 
-바인딩이 loopback 이 아니면 부팅 때 무엇이 열렸고 무엇이 빠졌는지 콘솔에 찍습니다.
+If the binding is not loopback, the boot log prints what is open and what is missing.
 
 ---
 
-## 모니터에 띄워두고 쓰기 (PWA)
+## Leaving it on a monitor (PWA)
 
-설치형 앱으로 열어 상시 모니터에 걸어두는 쓰임을 염두에 두고 만들었습니다.
+This was built with leaving it installed on an always-on monitor in mind.
 
-설치형이 아니면 **화면 위에 띠가 하나 뜹니다** — `설치` 를 누르면 바로 설치됩니다.
-닫으면 기억하고, 설치가 끝나면 알아서 사라집니다. 설치할 수 없는 상황(평문 HTTP,
-설치 경로가 없는 브라우저)에서는 아예 뜨지 않습니다. 시키는 대로 해도 안 되는
-안내를 띄우느니 조용한 편이 낫습니다.
+When it is not installed, **a strip appears at the top of the screen** — press `Install`
+and it installs. Dismiss it and that is remembered; once installed it disappears on its
+own. It does not appear at all where installation is impossible (plaintext HTTP, a
+browser with no install path). Better quiet than telling you to do something that cannot
+work.
 
-**https 가 필요합니다.** 서비스워커는 보안 컨텍스트에서만 돌기 때문에
-`localhost` 가 아니면 평문 HTTP 로는 설치되지 않습니다 (기능은 그대로 동작하고,
-설치형으로만 안 열립니다). Tailscale 이면 이렇게 붙입니다:
+**https is required.** Service workers only run in a secure context, so outside
+`localhost` plaintext HTTP cannot install it (everything still works; it just will not
+open as an installed app). With Tailscale:
 
 ```bash
 tailscale cert $(tailscale status --json | jq -r .Self.DNSName | sed 's/\.$//')
 ```
 
-그리고 `SESSION_COOKIE_SECURE=true` 로 바꾸세요.
+Then set `SESSION_COOKIE_SECURE=true`.
 
-### 캐시에 무엇이 남는가
+### What ends up in the cache
 
-서비스워커([`web/public/sw.js`](web/public/sw.js))가 캐시에 넣는 것은 **앱 껍데기뿐입니다** —
-HTML 과 해시가 박힌 JS/CSS. `/api/*` 는 아예 가로채지 않습니다.
+The service worker ([`web/public/sw.js`](web/public/sw.js)) caches **the app shell only** —
+HTML and content-hashed JS/CSS. It never intercepts `/api/*`.
 
-이건 편의가 아니라 이 도구의 전제를 지키는 문제입니다. 로그 본문은 메모리에만 두기로
-했는데, 서비스워커가 API 응답을 캐시하면 고객사 prod 로그가 평문으로 디스크에 남고,
-로그아웃해도 안 지워지고, 같은 기기의 다음 사람이 앞사람 캐시를 읽습니다.
-Workbox 의 흔한 `runtimeCaching` 레시피가 정확히 그 일을 하기 때문에 직접 썼습니다.
-로그아웃하면 남은 껍데기 캐시까지 비웁니다.
+This is not a convenience, it is what keeps the tool's premise intact. Log bodies are
+supposed to live only in memory; if the service worker cached API responses, a customer's
+prod logs would sit in plaintext on disk, survive sign-out, and be readable by the next
+person on that machine. Workbox's common `runtimeCaching` recipe does exactly that, which
+is why this one is hand-written. Signing out clears even the shell cache.
 
-### 상시로 켜두면 달라지는 것들
+### What changes when it runs continuously
 
-| | 기본값 | 왜 |
+| | Default | Why |
 |---|---|---|
-| `SESSION_TTL_HOURS` | 12 | **유휴** 기준입니다. 화면이 10분마다 서버를 두드려 계속 연장합니다 |
-| `SESSION_MAX_HOURS` | 168 | 연장의 천장. 이 주기로는 사람이 가서 다시 로그인해야 합니다 |
-| `TAIL_BUFFER_MAX_LINES` | 20000 | **세션당** 입니다. 창 넷이면 넷 다 이만큼 쥡니다 |
-| `TAIL_BUFFER_MAX_BYTES` | 32MB | 위와 같습니다. 24시간 켜두면 이게 상시 점유 메모리입니다 |
-| `ALERT_MAX_TARGETS` | 3 | 규칙이 걸린 대상 수. 이만큼이 아무도 안 봐도 계속 돕니다 |
-| `ALERT_HIT_RETENTION_DAYS` | 30 | 알림 기록 보존 |
+| `SESSION_TTL_HOURS` | 12 | An **idle** window. The screen pings the server every 10 minutes and keeps extending it |
+| `SESSION_MAX_HOURS` | 168 | The ceiling on extension. At this interval a human has to sign in again |
+| `TAIL_BUFFER_MAX_LINES` | 20000 | **Per session.** Four panes each hold this much |
+| `TAIL_BUFFER_MAX_BYTES` | 32MB | Same. Left on for a day, this is permanently occupied memory |
+| `ALERT_MAX_TARGETS` | 3 | Targets with a rule on them. This many keep running with nobody watching |
+| `ALERT_HIT_RETENTION_DAYS` | 30 | How long alert records are kept |
 
-무기한 로그인을 만들고 싶으면 `SESSION_MAX_HOURS` 를 올리는 대신,
-**키오스크 전용 계정**을 따로 발급하고 prod 열람 권한을 주지 않는 편이 낫습니다.
-상시 로그인된 브라우저는 그대로 상시 유효한 자격증명입니다.
+If you want a login that never expires, rather than raising `SESSION_MAX_HOURS`, issue a
+**dedicated kiosk account** and do not give it prod access. A permanently signed-in
+browser is a permanently valid credential.
 
-### 알아서 버티는 것들
+### What it survives on its own
 
-- 서버가 재시작하거나 세션이 유휴 정리되면 로그의 seq 가 0부터 다시 시작합니다.
-  화면은 세대(generation)가 바뀐 것을 보고 쌓아둔 것을 버리고 다시 채웁니다 —
-  이걸 안 하면 "연결됨" 인 채로 새 로그만 조용히 안 들어옵니다
-- 화면이 렌더 중에 터지면 무엇이 났는지 보여주고 스스로 새로고침합니다
-  (되풀이되면 기다리는 시간을 늘립니다)
-- 새 배포가 올라오면 서비스워커가 알아채고 한 번 새로고침합니다.
-  보고 있던 창은 URL 에 들어 있어 그대로 돌아옵니다
-- 서명 URL 이 만료되기 전에 미리 다시 받습니다. 만료된 URL 로 받은 오류 응답을
-  로그로 착각해 먹지 않습니다
-- 열려 있는 스트림도 15초마다 권한을 다시 봅니다. 계정을 끄거나 조직 권한을
-  회수하면 이미 열린 창도 끊깁니다. 알림 규칙도 1분마다 같은 것을 봅니다
-- 아무도 안 볼 때를 지켜보게 하려면 [알림](#알림) 을 겁니다. 화면이 가려져 있어도
-  보이게 하려면 벨 안에서 데스크톱 알림을 켭니다
+- When the server restarts or a session is cleaned up for being idle, log `seq` restarts
+  at 0. The screen notices the generation changed, drops what it had and refills — without
+  this it sits there saying "connected" while new logs quietly never arrive
+- If the view throws while rendering, it shows what happened and refreshes itself
+  (backing off if it keeps happening)
+- When a new build is deployed the service worker notices and refreshes once. The panes
+  you were watching are in the URL, so they come back
+- Signed URLs are refetched before they expire, and an error response from an expired URL
+  is not mistaken for log content
+- Open streams recheck authorization every 15 seconds. Disabling an account or revoking
+  org access cuts off panes that are already open. Alert rules recheck the same thing
+  every minute
+- To have something watched while nobody is looking, set up an [alert](#alerts). To see it
+  even when the window is covered, turn on desktop notifications in the bell
 
-### 남는 것
+### What remains
 
-화면 앞을 지나가는 사람 전부가 관객입니다. 마스킹은 IP·이메일·주민번호·카드번호·
-Bearer 토큰을 잡지만 한국 휴대폰 번호, 한글 이름·주소, 접두어 없는 JWT,
-고객사 고유 식별자는 규칙이 없습니다. 상시로 띄울 거면 그 로그에 맞춰
-[`server/parse/mask.ts`](server/parse/mask.ts) 의 규칙을 한 번 더 채우세요.
+Everyone walking past the screen is an audience. Masking catches IPs, emails, national ID
+numbers, card numbers and Bearer tokens — but there are no rules for Korean mobile numbers,
+Korean names and addresses, JWTs without a prefix, or a customer's own identifiers. If
+this is going to stay up, fill in [`server/parse/mask.ts`](server/parse/mask.ts) for that
+particular log first.
 
-서버는 표시용 기기에서 돌리지 않는 편이 낫습니다 — `.env` 에 모든 조직의
-client secret 이 평문으로 있습니다.
-
----
-
-## 문제가 생기면
-
-**로그인 화면에서 "이메일 또는 비밀번호가 올바르지 않다"**
-`ADMIN_INITIAL_PASSWORD` 는 **첫 부팅에만** 쓰입니다. 이미 계정이 만들어진 뒤에
-`.env` 를 고쳐도 반영되지 않습니다. `data/app.db` 를 지우면 처음부터 다시 시딩되지만
-계정·감사 기록이 함께 날아갑니다.
-
-**환경 목록이 비어 있습니다**
-**Cloud Manager 에서 새로고침**을 누르세요. 그래도 비면 `npm run phase0 -- --org <키>`
-로 자격증명부터 확인하세요.
-
-**Adobe 가 403 을 줍니다**
-둘 중 하나입니다. (1) 그 자격증명에 해당 환경 권한이 없습니다 — Developer Console 의
-제품 프로필을 확인하세요. (2) `ORG_n_KEY` 는 그대로 두고 자격증명만 바꿔서, 캐시된
-환경 목록이 옛 조직 것입니다 — 새로고침하면 풀립니다.
-
-**조직을 추가했는데 안 보입니다**
-[조직을 추가할 때](#조직을-추가할-때) 를 보세요. 서버 재시작과 계정 권한 부여가 둘 다 필요합니다.
-
-**tail 이 열렸는데 아무것도 안 옵니다**
-트래픽이 없거나, 고른 레벨에 해당하는 줄이 없습니다. 헤더의 마지막 로그 나이를 보세요.
-3분을 넘어 있으면 그 환경에 요청 자체가 없는 것입니다. 레벨을 '전체' 로 넓혀 확인하세요.
-
-**알림 규칙을 만들었는데 안 옵니다**
-먼저 [지연](#알아둘-것)을 확인하세요 — 2~3분은 정상입니다. 그래도 안 오면 규칙 화면에서
-그 규칙이 **꺼져 있는지** 보세요. 스스로 꺼졌다면 이유가 배지로 붙어 있습니다
-(권한 회수 / 대상 상한 / 패턴 문제). 켜져 있는데 안 온다면 레벨이 좁은 경우가 많습니다 —
-access 계열은 전부 INFO 라 ERROR/WARN 만 걸어두면 영영 안 맞습니다.
-
-**데스크톱 알림이 안 뜹니다**
-벨을 열어 `데스크톱 알림` 상태를 보세요. `차단됨` 이면 브라우저 사이트 설정에서
-이 사이트의 알림을 허용해야 합니다 — 한 번 거절하면 앱에서 다시 물을 수 없습니다.
-`꺼짐` 이면 누르면 됩니다. 앱 안의 벨 배지는 이것과 무관하게 계속 동작합니다.
-
-**조회 결과가 비었습니다**
-구간이 짧으면 마지막 2분은 아직 도착하지 않았을 수 있습니다. Adobe 보존은 7일이라
-그 밖의 구간은 읽지 못하고, 그런 날짜는 화면이 따로 알려줍니다.
-
-**날짜가 하루 어긋나 보입니다**
-로그는 UTC 로 쌓입니다. KST 새벽 0~9시는 전날 UTC 파일에 들어 있습니다.
-화면은 KST/UTC 를 토글할 수 있고, 조회는 이 경계를 알아서 처리합니다.
-
-**`npm install` 이 네이티브 모듈에서 실패합니다**
-`better-sqlite3` 와 `@node-rs/argon2` 를 빌드합니다. macOS 는 Xcode Command Line Tools,
-리눅스는 `build-essential`, 윈도우는 Visual Studio Build Tools 가 필요할 수 있습니다.
+Better not to run the server on the display machine — `.env` holds every organization's
+client secret in plaintext.
 
 ---
 
-## 개발
+## When something goes wrong
+
+**"Email or password is not correct" on the sign-in screen**
+`ADMIN_INITIAL_PASSWORD` is used **on first boot only.** Editing `.env` after the account
+exists changes nothing. Deleting `data/app.db` reseeds from scratch, but accounts and
+audit records go with it.
+
+**Could not reach the server**
+The server is not running. Start it with `npm start` — the app shell is served from the
+service worker cache, so the screen looks fine even when the server is down.
+
+**The environment list is empty**
+Press **Refresh from Cloud Manager**. If it is still empty, check the credentials first
+with `npm run phase0 -- --org <key>`.
+
+**Adobe returns 403**
+One of two things. (1) That credential has no access to the environment — check the
+product profile in the Developer Console. (2) You kept `ORG_n_KEY` and swapped only the
+credentials, so the cached environment list belongs to the old organization — a refresh
+clears it.
+
+**I added an organization and it does not show up**
+See [Adding an organization](#adding-an-organization). Both a server restart and an
+account grant are required.
+
+**The tail opened but nothing arrives**
+Either there is no traffic, or no lines match the level you picked. Look at the age of
+the newest log in the header. Past three minutes, that environment is getting no requests
+at all. Widen the level to "all" to check.
+
+**I created an alert rule and nothing comes**
+Check [the delay](#things-to-know) first — 2–3 minutes is normal. If it still does not
+come, look at whether the rule is **off** on the rules screen. If it turned itself off,
+the reason is on a badge (access revoked / target cap / pattern problem). If it is on and
+silent, the levels are usually too narrow — access logs are all INFO, so a rule set to
+ERROR/WARN will never match.
+
+**Desktop notifications do not appear**
+Open the bell and look at the `Desktop notifications` state. `Blocked` means you have to
+allow notifications for this site in browser settings — once refused, the app cannot ask
+again. `Off` just needs a click. The in-app bell badge works regardless.
+
+**The search came back empty**
+Over a short range the last two minutes may not have arrived yet. Adobe's retention is
+seven days, so anything older cannot be read, and the UI names those dates separately.
+
+**Dates look off by a day**
+Logs accumulate in UTC. Between midnight and 09:00 KST they are in the previous UTC file.
+The UI toggles KST/UTC, and search handles this boundary for you.
+
+**`npm install` fails on a native module**
+It builds `better-sqlite3` and `@node-rs/argon2`. macOS may need the Xcode Command Line
+Tools, Linux `build-essential`, Windows the Visual Studio Build Tools.
+
+---
+
+## Development
 
 ```bash
-npm run dev       # 서버 (7300)
-npm run dev:web   # Vite (7301, /api 는 7300 으로 프록시)
+npm run dev       # server (7300)
+npm run dev:web   # Vite (7301, proxies /api to 7300)
 ```
 
-브라우저는 http://127.0.0.1:7301 로 엽니다.
+Open http://127.0.0.1:7301 in the browser.
 
 ```bash
-npm run typecheck   # 서버 + 웹
-npm test            # 단위 테스트
-npm run build       # dist/ 로 빌드
+npm run typecheck   # server + web
+npm test            # unit tests
+npm run build       # build into dist/
 ```
 
-`.env` 를 고쳤으면 **서버를 재시작하세요.** `tsx watch` 는 `server/` 만 봅니다.
+If you edited `.env`, **restart the server.** `tsx watch` only watches `server/`.
 
-### 구조
+### Layout
+
+Source comments are in Korean.
 
 ```
 server/
-  config/env.ts          .env 파싱 + zod 검증 + 조직 레지스트리 (메모리 전용)
-  db/                    Drizzle 스키마 · 손으로 쓴 마이그레이션
-  auth/                  비밀번호(argon2id) · 세션 · 레이트 리밋 · 감사 기록 · 가드
-  auth/adminops.ts       계정 조작 + 잠금 방지 가드
-  auth/session.ts        세션 발급·해석 + 슬라이딩 연장 (천장은 SESSION_MAX_HOURS)
-  adobe/ims.ts           IMS 토큰 발급·캐시 (조직 단위로 격리)
-  adobe/cloudmanager.ts  읽기 전용 API 클라이언트. 302 Location 을 직접 읽는다
-  adobe/envcache.ts      환경 목록 캐시 + 자격증명 지문
-  parse/                 로그 7종 파서 · 마스킹
-  alerts/matcher.ts      규칙 컴파일. 서버에서 도는 정규식이라 여기서 막는다
-  alerts/watch.ts        규칙이 걸린 대상을 아무도 안 봐도 따라간다 · 소음 제어
-  tail/session.ts        폴링 루프 + 링버퍼 + UTC 롤오버 + 서명 URL 선제 갱신
-  tail/buffer.ts         링버퍼. 줄 수·바이트 두 상한, 여유를 두고 한 번에 축출
-  tail/registry.ts       세션 ref-count · 유휴 정리
-  search/range.ts        조회 구간 → UTC 날짜 파일 (KST 새벽은 전날 파일이다)
-  search/scan.ts         .gz 스트리밍 스캔. 전체를 메모리에 올리지 않는다
-  export/format.ts       출처 헤더 · 파일명 규칙 · log/json/csv 렌더
-  i18n/messages.ts       서버 오류 메시지 (ko/en)
+  config/env.ts          .env parsing + zod validation + org registry (memory only)
+  db/                    Drizzle schema · hand-written migrations
+  auth/                  passwords (argon2id) · sessions · rate limit · audit · guards
+  auth/adminops.ts       account operations + lockout guards
+  auth/session.ts        session issue/resolve + sliding renewal (ceiling: SESSION_MAX_HOURS)
+  adobe/ims.ts           IMS token issue and cache (isolated per organization)
+  adobe/cloudmanager.ts  read-only API client; reads the 302 Location itself
+  adobe/envcache.ts      environment list cache + credential fingerprint
+  parse/                 seven log parsers · masking
+  alerts/matcher.ts      rule compilation. Regexes run on the server, so they are vetted here
+  alerts/watch.ts        follows targets with rules even when nobody looks · noise control
+  tail/session.ts        polling loop + ring buffer + UTC rollover + signed-URL refresh
+  tail/buffer.ts         ring buffer. Caps on both lines and bytes, evicted in batches
+  tail/registry.ts       session ref-counting · idle cleanup
+  search/range.ts        search range → UTC date files (early KST hours are the previous day)
+  search/scan.ts         streaming .gz scan; never loads the whole file into memory
+  export/format.ts       provenance header · filename rules · log/json/csv rendering
+  i18n/messages.ts       server error messages (ko/en)
   routes/                HTTP · SSE
 web/src/
-  components/LogViewer.tsx   가상 스크롤 + 자동 추적
-  components/LogLine.tsx     레벨 배지 · 스택 접힘 · 하이라이트
-  components/TailPane.tsx    창 하나 = 스트림 하나
-  components/ErrorBoundary.tsx  화면이 터지면 보여주고 스스로 새로고침
-  components/AlertBell.tsx      알림함 + 데스크톱 알림 토글
-  components/InstallBanner.tsx  설치형이 아닐 때만 뜨는 안내
-  lib/desktopNotify.ts          OS 토스트. 본문은 싣지 않는다
-  lib/logbuffer.ts           화면 쪽 상한 (줄 수 + 크기). 서버 링버퍼의 짝
-  pwa.ts                     서비스워커 등록 · 새 배포 감지
-  components/SearchPane.tsx  창 하나 = 조회 잡 하나
-  i18n/strings.ts            화면 문자열 (ko/en)
-  api/                       SSE 구독 · REST
+  components/LogViewer.tsx      virtual scrolling + follow mode
+  components/LogLine.tsx        level badge · stack folding · highlighting
+  components/TailPane.tsx       one pane = one stream
+  components/SearchPane.tsx     one pane = one search job
+  components/ErrorBoundary.tsx  shows what broke and refreshes itself
+  components/AlertBell.tsx      alert inbox + desktop notification toggle
+  components/InstallBanner.tsx  shown only when not installed
+  lib/desktopNotify.ts          OS toasts. No log text is included
+  lib/logbuffer.ts              client-side caps (lines + size). Counterpart to the server ring buffer
+  pwa.ts                        service worker registration · new-deploy detection
+  i18n/strings.ts               UI strings (ko/en)
+  api/                          SSE subscriptions · REST
   pages/
 web/public/
-  sw.js                      서비스워커. 껍데기만 캐시하고 /api 는 손대지 않는다
-  manifest.webmanifest       설치형 앱 정의
-shared/types.ts              서버·클라이언트 공용 타입
-shared/signature.ts          '같은 사건' 지문. 화면 묶기와 알림이 같은 기준을 쓴다
-scripts/phase0-probe.ts      실환경 프로브
-scripts/make-icons.ts        PWA 아이콘 생성 (`npm run icons`)
+  sw.js                         service worker. Caches the shell only, never touches /api
+  manifest.webmanifest          installable app definition
+shared/types.ts                 types shared by server and client
+shared/signature.ts             "same event" fingerprint. Grouping and alerts use one rule
+scripts/phase0-probe.ts         probe against a real environment
+scripts/make-icons.ts           PWA icon generation (`npm run icons`)
 ```
 
-### 문자열을 고칠 때
+### Editing strings
 
-`web/src/i18n/strings.ts` 와 `server/i18n/messages.ts` 두 곳입니다.
-`en` 은 `Record<StringKey, string>` 이라 키를 빠뜨리면 타입 검사에서 걸리고,
-자리표시자가 어긋나거나 안 쓰는 키가 남으면 테스트가 잡습니다.
+Two places: `web/src/i18n/strings.ts` and `server/i18n/messages.ts`. `en` is a
+`Record<StringKey, string>`, so a missing key fails the type check, and mismatched
+placeholders or unused keys are caught by tests.
 
-비밀번호 최소 길이 같은 숫자는 서버가 내려줍니다 (`/api/auth/me` 의 `minPasswordLength`).
-화면에 박아두면 정책을 바꿨을 때 안내와 검증이 따로 놀게 됩니다. 정하는 곳은
-`server/auth/password.ts` 한 군데뿐입니다.
+Numbers like the minimum password length come from the server (`minPasswordLength` in
+`/api/auth/me`). Hard-coding them in the UI makes the guidance and the validation drift
+apart when the policy changes. There is exactly one place that decides:
+`server/auth/password.ts`.
 
 ---
 
-## 라이선스
+## License
 
-[MIT](LICENSE). 마음대로 쓰고 고치고 배포해도 됩니다. 보증은 없습니다.
+[MIT](LICENSE). Use, modify and distribute it freely. No warranty.
 
-Adobe 와 무관한 개인 프로젝트입니다. AEM, Cloud Manager, Adobe 는 Adobe 의 상표입니다.
+A personal project, unaffiliated with Adobe. AEM, Cloud Manager and Adobe are trademarks
+of Adobe.
 
-`.env` 와 `data/` 는 커밋하지 않습니다. `.gitignore` 에 있습니다.
-`docs/findings*.md` 의 프로그램·환경 ID 와 스토리지 계정명은 가명입니다 —
-실제 값이 아니라 형태만 같습니다.
+`.env` and `data/` are never committed; they are in `.gitignore`. The program and
+environment IDs and the storage account name in `docs/findings*.md` are pseudonyms —
+the same shape as real values, but not real.

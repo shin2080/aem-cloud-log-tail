@@ -1,129 +1,145 @@
-# AEM Cloud Log Viewer — 기술 명세서
+# AEM Cloud Log Viewer — Technical Specification
 
-로컬에서 실행하는 AEM as a Cloud Service 로그 뷰어. 여러 고객사 조직과 환경(dev/stage/prod)을 한 화면에서 실시간으로 tail 하고, 특정 시간대의 에러 로그를 조회하고, 필요한 구간만 골라 파일로 저장한다.
+**English** · [한국어](SPEC.ko.md)
+
+> **This was written before implementation.** It is kept as a historical record — the
+> actual implementation diverged from it in several places. For how the tool behaves
+> today, read [README.md](README.md).
+>
+> Notable differences: alerts are listed here as a non-goal but are implemented; there
+> are seven parsers, not just `aemerror`; Fastify is 5, not 4; polling is every 20
+> seconds, not 5; ring buffer defaults are 20,000 lines / 32MB, not 50,000 / 128MB; and
+> the minimum password length is 8, not 12.
+
+A locally run log viewer for AEM as a Cloud Service. Tail logs from several customer
+organizations and environments (dev/stage/prod) live on one screen, search error logs
+for a given time range, and save only the slice you need to a file.
 
 ---
 
-## 1. 설계 제약
+## 1. Design constraints
 
-이 프로젝트의 성격을 결정하는 다섯 가지 제약. 구현 중 판단이 갈릴 때 여기로 돌아온다.
+Five constraints that define the character of this project. When a judgment call during
+implementation is close, come back here.
 
-| # | 제약 | 의미 |
+| # | Constraint | What it means |
 |---|---|---|
-| 1 | **로그를 영구 저장하지 않는다** | DB에는 설정·계정·감사 기록만 넣는다. 로그 본문은 메모리 링버퍼에만 존재하고 프로세스가 죽으면 사라진다. 사용자는 스트림에서 원하는 구간을 골라 파일로 내보낸다. |
-| 2 | **로컬 전용** | 외부 호스팅 없음. `localhost` 바인딩이 기본. DB는 SQLite 파일 하나. |
-| 3 | **읽기 전용** | Cloud Manager에 쓰기 작업을 하는 코드는 넣지 않는다. 파이프라인 실행, 환경 변경 API는 호출하지 않는다. |
-| 4 | **자격증명은 `.env`에만** | DB·소스코드·프론트엔드 어디에도 client secret이 존재하지 않는다. 브라우저는 IMS 토큰의 존재조차 몰라야 한다. |
-| 5 | **조직 경계는 서버에서 강제** | 프론트가 보내는 org 식별자를 신뢰하지 않는다. 모든 요청에서 세션 사용자의 소속 조직과 대조한다. |
+| 1 | **Logs are never persisted** | The DB holds config, accounts and audit records only. Log bodies exist only in an in-memory ring buffer and vanish when the process dies. The user picks a range out of the stream and exports it to a file. |
+| 2 | **Local only** | No external hosting. `localhost` binding by default. The DB is a single SQLite file. |
+| 3 | **Read only** | No code that writes to Cloud Manager. Pipeline execution and environment-change APIs are never called. |
+| 4 | **Credentials live in `.env` only** | No client secret exists in the DB, the source, or the frontend. The browser must not even know an IMS token exists. |
+| 5 | **Org boundaries are enforced server-side** | The org identifier the frontend sends is never trusted. Every request is checked against the session user's organizations. |
 
-### 비목표
+### Non-goals
 
-- 로그 장기 보관·아카이빙 (Cloud Manager 자체 보존 7일을 그대로 따른다)
-- 알림·임계치 감지
-- CDN 로그, Dispatcher 로그 (v1은 AEM `aemerror` 중심. 파서는 확장 가능하게 두되 구현은 하지 않는다)
-- 멀티 유저 동시 접속 최적화 (동시 사용자 5명 이하를 가정)
+- Long-term log retention or archiving (follow Cloud Manager's own 7-day retention)
+- Alerting and threshold detection
+- CDN logs and dispatcher logs (v1 centers on AEM `aemerror`. Leave the parser
+  extensible but do not implement them)
+- Optimizing for many concurrent users (assume five or fewer)
 
 ---
 
-## 2. 기술 스택
+## 2. Stack
 
 ```
-runtime     Node.js 20+ / TypeScript (strict)
-backend     Fastify 4 + @fastify/cookie, @fastify/static
-db          SQLite (better-sqlite3) + Drizzle ORM
-frontend    React 18 + Vite + TypeScript
-ui          Mantine v7 (+ @mantine/dates, @mantine/notifications, @mantine/hooks)
-가상스크롤   @tanstack/react-virtual
-폰트        Pretendard Variable (UI) / JetBrains Mono (로그 본문)
-암호화      @node-rs/argon2
-빌드/실행    단일 프로세스. Fastify가 Vite 빌드 산출물을 정적 서빙한다.
+runtime      Node.js 20+ / TypeScript (strict)
+backend      Fastify 4 + @fastify/cookie, @fastify/static
+db           SQLite (better-sqlite3) + Drizzle ORM
+frontend     React 18 + Vite + TypeScript
+ui           Mantine v7 (+ @mantine/dates, @mantine/notifications, @mantine/hooks)
+virtual list @tanstack/react-virtual
+fonts        Pretendard Variable (UI) / JetBrains Mono (log bodies)
+hashing      @node-rs/argon2
+build/run    One process. Fastify serves the Vite build output statically.
 ```
 
-**모노레포 아님.** `server/`, `web/`, `shared/` 세 디렉터리를 가진 단일 패키지로 간다. 워크스페이스 도구를 도입할 만큼 크지 않다.
+**Not a monorepo.** A single package with three directories: `server/`, `web/`,
+`shared/`. Not large enough to justify workspace tooling.
 
 ```
 /
 ├── .env.example
 ├── server/
-│   ├── index.ts              진입점
-│   ├── config/env.ts         .env 파싱 + 조직 레지스트리 구성
-│   ├── db/schema.ts          Drizzle 스키마
+│   ├── index.ts              entry point
+│   ├── config/env.ts         .env parsing + org registry construction
+│   ├── db/schema.ts          Drizzle schema
 │   ├── db/migrate.ts
-│   ├── auth/                 세션, 비밀번호, 미들웨어
-│   ├── adobe/ims.ts          IMS 토큰 발급·캐시
-│   ├── adobe/cloudmanager.ts Cloud Manager API 클라이언트
-│   ├── tail/session.ts       TailSession (폴링 루프 + 링버퍼)
-│   ├── tail/registry.ts      TailSession 생명주기 관리
-│   ├── parse/aemerror.ts     로그 파서
-│   ├── parse/mask.ts         마스킹
-│   ├── search/scan.ts        시간대 조회 (스트리밍 스캔)
-│   ├── export/               파일 내보내기
+│   ├── auth/                 sessions, passwords, middleware
+│   ├── adobe/ims.ts          IMS token issue and cache
+│   ├── adobe/cloudmanager.ts Cloud Manager API client
+│   ├── tail/session.ts       TailSession (polling loop + ring buffer)
+│   ├── tail/registry.ts      TailSession lifecycle
+│   ├── parse/aemerror.ts     log parser
+│   ├── parse/mask.ts         masking
+│   ├── search/scan.ts        time-range search (streaming scan)
+│   ├── export/               file export
 │   └── routes/
 ├── web/
-│   ├── src/theme.ts          Mantine 테마
+│   ├── src/theme.ts          Mantine theme
 │   ├── src/pages/
 │   ├── src/components/
 │   └── src/api/
-└── shared/types.ts           서버·클라이언트 공용 타입
+└── shared/types.ts           types shared by server and client
 ```
 
 ---
 
-## 3. 시스템 흐름
+## 3. System flow
 
 ```
-[Cloud Manager API] ──302──> [서명된 Blob URL]
+[Cloud Manager API] ──302──> [signed Blob URL]
         │                            │
-        │ (토큰 갱신 시에만)          │ Range: bytes=<offset>-  (5초 주기)
+        │ (only on token refresh)    │ Range: bytes=<offset>-  (every 5s)
         ▼                            ▼
-   ┌────────────────────────────────────────┐
-   │  TailSession (환경×서비스×로그파일 단위) │
-   │   offset 관리 · 파서 · 마스킹 · 링버퍼   │
-   └────────────────────────────────────────┘
-        │ SSE (레벨 필터 적용 후)
+   ┌─────────────────────────────────────────────────┐
+   │  TailSession (one per environment×service×log)  │
+   │   offset · parser · masking · ring buffer       │
+   └─────────────────────────────────────────────────┘
+        │ SSE (after the level filter)
         ▼
-   [브라우저] ── 선택 구간 내보내기 ──> [.log / .zip 다운로드]
+   [browser] ── export selection ──> [.log / .zip download]
 
    [SQLite]  users · user_orgs · sessions · env_cache · audit_log · saved_filters
-             (로그 본문 없음)
+             (no log bodies)
 ```
 
 ---
 
-## 4. `.env` 명세
+## 4. `.env` specification
 
-`.env.example`을 반드시 함께 만든다. 실제 값이 들어간 `.env`는 `.gitignore`에 넣는다.
+Always ship a `.env.example` alongside. The real `.env` goes in `.gitignore`.
 
 ```dotenv
-# ── 서버 ──────────────────────────────────────────
+# ── server ────────────────────────────────────────
 PORT=7300
 HOST=127.0.0.1
 DATABASE_PATH=./data/app.db
 SESSION_SECRET=                    # openssl rand -hex 32
 SESSION_TTL_HOURS=12
 
-# ── 최초 관리자 (첫 부팅 때만 사용) ─────────────────
+# ── first administrator (first boot only) ─────────
 ADMIN_EMAIL=admin@example.com
-ADMIN_INITIAL_PASSWORD=            # 최초 로그인 후 변경 강제
+ADMIN_INITIAL_PASSWORD=            # change forced after first sign-in
 
-# ── 버퍼 / 안전장치 ────────────────────────────────
+# ── buffers / safety limits ───────────────────────
 TAIL_POLL_INTERVAL_MS=5000
-TAIL_BUFFER_MAX_LINES=50000        # 세션당 링버퍼 라인 수
-TAIL_BUFFER_MAX_BYTES=134217728    # 세션당 128MB
-TAIL_IDLE_TIMEOUT_MS=300000        # 구독자 0명이 5분 지나면 세션 종료
+TAIL_BUFFER_MAX_LINES=50000        # ring buffer lines per session
+TAIL_BUFFER_MAX_BYTES=134217728    # 128MB per session
+TAIL_IDLE_TIMEOUT_MS=300000        # end the session 5 minutes after the last subscriber
 SEARCH_MAX_RESULT_LINES=200000
 EXPORT_MAX_BYTES=524288000         # 500MB
 MASKING_ENABLED=true
 
-# ── 조직 레지스트리 ────────────────────────────────
-# ORG_{n}_ 접두어를 1부터 순번대로 스캔한다.
-# ORG_{n}_LABEL 이 없으면 스캔을 멈춘다.
-ORG_1_KEY=acme                     # URL·DB에서 쓰는 안정적 식별자 (소문자, 영숫자/하이픈)
-ORG_1_LABEL=ACME 코퍼레이션
+# ── organization registry ─────────────────────────
+# Scanned by the ORG_{n}_ prefix, starting at 1.
+# Scanning stops at the first missing ORG_{n}_LABEL.
+ORG_1_KEY=acme                     # stable identifier used in URLs and the DB (lowercase, alphanumeric/hyphen)
+ORG_1_LABEL=ACME Corporation
 ORG_1_IMS_ORG_ID=XXXXXXXXXXXX@AdobeOrg
 ORG_1_CLIENT_ID=
 ORG_1_CLIENT_SECRET=
-ORG_1_SCOPES=                      # Developer Console에 표시된 scope 문자열을 그대로 복사
+ORG_1_SCOPES=                      # copy the scope string exactly as shown in the Developer Console
 
 ORG_2_KEY=globex
 ORG_2_LABEL=Globex
@@ -133,18 +149,22 @@ ORG_2_CLIENT_SECRET=
 ORG_2_SCOPES=
 ```
 
-### 로딩 규칙
+### Loading rules
 
-- 부팅 시 zod로 검증한다. 필수 값이 비어 있으면 **명확한 메시지와 함께 즉시 종료**한다. 반쯤 뜬 채로 런타임에 터지게 두지 않는다.
-- `ORG_n_KEY`는 DB의 `user_orgs.org_key`와 조인되는 값이다. **한 번 정하면 바꾸지 않는다**는 주석을 `.env.example`에 남긴다.
-- 프로그램·환경 목록은 `.env`에 넣지 않는다. Cloud Manager API로 조회해서 DB에 캐시한다. 그래야 고객사 환경이 늘어나도 `.env`를 안 건드린다.
-- 조직 설정은 프로세스 메모리에만 올린다. `/api/orgs` 응답에는 `key`와 `label`만 담고 나머지 필드는 절대 직렬화하지 않는다.
+- Validate with zod at boot. If a required value is empty, **exit immediately with a
+  clear message.** Do not come up half-configured and blow up at runtime.
+- `ORG_n_KEY` joins against `user_orgs.org_key` in the DB. Leave a comment in
+  `.env.example` saying **once chosen, never change it**.
+- Program and environment lists do not go in `.env`. Fetch them from the Cloud Manager
+  API and cache them in the DB, so `.env` stays untouched as a customer's environments grow.
+- Org configuration lives in process memory only. The `/api/orgs` response carries `key`
+  and `label` and nothing else; the remaining fields are never serialized.
 
 ---
 
-## 5. 데이터 모델
+## 5. Data model
 
-로그 본문 테이블은 없다. 있으면 안 된다.
+There is no table for log bodies. There must not be one.
 
 ```sql
 users
@@ -158,20 +178,20 @@ users
   created_at    INTEGER NOT NULL
   last_login_at INTEGER
 
-user_orgs                        -- 조직 접근 권한
+user_orgs                        -- organization access
   user_id       TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE
-  org_key       TEXT NOT NULL    -- .env의 ORG_n_KEY
-  allow_prod    INTEGER NOT NULL DEFAULT 0   -- prod 환경 열람 여부를 따로 통제
+  org_key       TEXT NOT NULL    -- ORG_n_KEY from .env
+  allow_prod    INTEGER NOT NULL DEFAULT 0   -- prod access is controlled separately
   PRIMARY KEY (user_id, org_key)
 
 sessions
-  id            TEXT PK          -- 랜덤 256bit, 쿠키에 담김
+  id            TEXT PK          -- random 256-bit, carried in the cookie
   user_id       TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE
   created_at    INTEGER NOT NULL
   expires_at    INTEGER NOT NULL
   user_agent    TEXT
 
-env_cache                        -- Cloud Manager 조회 결과 캐시
+env_cache                        -- cached Cloud Manager lookups
   org_key       TEXT NOT NULL
   program_id    TEXT NOT NULL
   program_name  TEXT NOT NULL
@@ -186,15 +206,15 @@ audit_log
   id            INTEGER PK AUTOINCREMENT
   at            INTEGER NOT NULL
   user_id       TEXT
-  user_email    TEXT NOT NULL    -- 계정이 삭제돼도 기록이 남도록 비정규화
+  user_email    TEXT NOT NULL    -- denormalized so the record survives account deletion
   action        TEXT NOT NULL    -- 'login' | 'login_failed' | 'tail_open' | 'search' | 'export' | 'admin_user_create' ...
   org_key       TEXT
   environment_id TEXT
   environment_type TEXT
-  detail        TEXT             -- JSON: 범위, 필터, 라인 수, 바이트 수
+  detail        TEXT             -- JSON: range, filters, line count, byte count
   ip            TEXT
 
-saved_filters                    -- 자주 쓰는 필터 저장 (편의 기능)
+saved_filters                    -- frequently used filters (convenience)
   id            TEXT PK
   user_id       TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE
   name          TEXT NOT NULL
@@ -202,15 +222,15 @@ saved_filters                    -- 자주 쓰는 필터 저장 (편의 기능)
   created_at    INTEGER NOT NULL
 ```
 
-`audit_log`는 삭제 API를 만들지 않는다. 조회만 가능하다.
+`audit_log` gets no delete API. It is read-only.
 
 ---
 
-## 6. Cloud Manager 연동
+## 6. Cloud Manager integration
 
-### 6.1 IMS 토큰
+### 6.1 IMS tokens
 
-OAuth Server-to-Server (`client_credentials`). JWT 방식은 폐기됐으므로 쓰지 않는다.
+OAuth Server-to-Server (`client_credentials`). JWT is retired, so it is not used.
 
 ```
 POST https://ims-na1.adobelogin.com/ims/token/v3
@@ -222,11 +242,12 @@ client_secret={ORG_n_CLIENT_SECRET}
 scope={ORG_n_SCOPES}
 ```
 
-- 조직별로 메모리에 캐시한다. `expires_in`의 90% 지점에서 선제 갱신.
-- 갱신 실패는 조직 단위로 격리한다. A사 자격증명이 만료돼도 B사 탭은 계속 동작해야 한다.
-- **토큰 값은 어떤 로그에도 찍지 않는다.** 디버그 출력에서도.
+- Cached in memory per organization. Refreshed proactively at 90% of `expires_in`.
+- Refresh failures are isolated per organization. If org A's credentials expire, org B's
+  tabs must keep working.
+- **The token value is never written to any log.** Not even to debug output.
 
-### 6.2 API 호출
+### 6.2 API calls
 
 ```
 Base: https://cloudmanager.adobe.io
@@ -237,105 +258,121 @@ Headers:
   Accept:          application/json
 ```
 
-| 용도 | 엔드포인트 |
+| Purpose | Endpoint |
 |---|---|
-| 프로그램 목록 | `GET /api/programs` |
-| 환경 목록 | `GET /api/program/{programId}/environments` |
-| 가용 로그 옵션 | `GET /api/program/{p}/environment/{e}/logs?days=1` |
-| 로그 다운로드 | `GET /api/program/{p}/environment/{e}/logs/download?service={service}&name={name}&date=YYYY-MM-DD` |
+| Program list | `GET /api/programs` |
+| Environment list | `GET /api/program/{programId}/environments` |
+| Available log options | `GET /api/program/{p}/environment/{e}/logs?days=1` |
+| Log download | `GET /api/program/{p}/environment/{e}/logs/download?service={service}&name={name}&date=YYYY-MM-DD` |
 
-마지막 것은 **302로 서명된 스토리지 URL을 반환한다.** HTTP 클라이언트의 자동 리다이렉트를 끄고 `Location` 헤더를 직접 읽어야 한다.
+The last one **returns a signed storage URL via a 302.** Turn off the HTTP client's
+automatic redirect following and read the `Location` header directly.
 
-### 6.3 Tail 알고리즘 — 이 프로젝트의 핵심
-
-```
-1. 다운로드 엔드포인트 호출 → 302 Location에서 서명 URL 획득, 만료 시각 기록
-2. 서명 URL에 HEAD 또는 Range: bytes=0-0 요청 → Content-Range로 전체 크기 파악
-3. 최초 진입: 끝에서 역방향으로 TAIL_INITIAL_BYTES(기본 256KB)만 읽어 시작점을 잡는다
-   (파일 전체를 받지 않는다. 이게 이 도구의 존재 이유다)
-4. offset = 파일 크기
-5. 루프 (TAIL_POLL_INTERVAL_MS):
-     a. 서명 URL에 Range: bytes={offset}- 요청
-     b. 416 → 새 데이터 없음, 다음 루프
-     c. 200/206 → 받은 청크를 파서로 넘기고 offset += 청크 길이
-     d. 서명 URL 만료가 임박하면 1번부터 재수행 (offset은 유지)
-     e. UTC 자정 경과 시 → 날짜 파라미터를 갱신하고 새 파일로 전환, offset = 0
-```
-
-**Range 요청은 Cloud Manager API가 아니라 스토리지에 직접 나간다.** 그래서 폴링을 아무리 자주 해도 Cloud Manager 레이트 리밋을 소모하지 않는다. 이 구조를 지키는 것이 중요하다. 매 폴링마다 302를 다시 받아오도록 짜면 안 된다.
-
-**UTC 자정 롤오버**는 이 도구에서 가장 버그가 잘 나는 지점이다. 한국 시간 오전 9시에 발생한다. 전용 테스트를 반드시 작성한다. 전환 시점에 이전 파일의 남은 꼬리를 한 번 더 읽고 넘어가야 로그가 비지 않는다.
-
-**세션 공유:** `TailSession`은 `(orgKey, environmentId, service, logName)` 키로 레지스트리에 등록하고 구독자를 ref-count 한다. 같은 환경을 두 명이 봐도 폴링 루프는 하나다. 구독자가 0이 되고 `TAIL_IDLE_TIMEOUT_MS`가 지나면 루프를 멈추고 버퍼를 비운다.
-
-### 6.4 로그 파싱
-
-`aemerror` 라인 포맷:
+### 6.3 The tail algorithm — the core of this project
 
 ```
-25.09.2023 15:34:56.428 [cm-p33452-e121351-aem-author-54c7ddc56c-vf8vb] *INFO* [sling-oak-observation-5] com.adobe.cq.Foo 메시지 본문
+1. Call the download endpoint → take the signed URL from the 302 Location, record its expiry
+2. HEAD or Range: bytes=0-0 against the signed URL → read the total size from Content-Range
+3. First entry: read only the last TAIL_INITIAL_BYTES (default 256KB) to find a starting point
+   (never download the whole file — this is the reason the tool exists)
+4. offset = file size
+5. Loop (TAIL_POLL_INTERVAL_MS):
+     a. Range: bytes={offset}- against the signed URL
+     b. 416 → no new data, next iteration
+     c. 200/206 → hand the chunk to the parser, offset += chunk length
+     d. If the signed URL is close to expiring, redo from step 1 (keep the offset)
+     e. Past UTC midnight → update the date parameter, switch files, offset = 0
+```
+
+**Range requests go directly to storage, not to the Cloud Manager API.** That is why
+polling as often as you like does not consume the Cloud Manager rate limit. Keeping this
+structure matters. Do not write it so that every poll fetches a new 302.
+
+**UTC midnight rollover** is where bugs are most likely in this tool. It happens at 09:00
+Korean time. Write dedicated tests for it. At the switch, read the remaining tail of the
+previous file once more, or logs go missing.
+
+**Session sharing:** register `TailSession` in a registry keyed by
+`(orgKey, environmentId, service, logName)` and ref-count subscribers. Two people
+watching the same environment share one polling loop. When subscribers reach zero and
+`TAIL_IDLE_TIMEOUT_MS` passes, stop the loop and clear the buffer.
+
+### 6.4 Log parsing
+
+`aemerror` line format:
+
+```
+25.09.2023 15:34:56.428 [cm-p33452-e121351-aem-author-54c7ddc56c-vf8vb] *INFO* [sling-oak-observation-5] com.adobe.cq.Foo message body
 ```
 
 ```ts
 const LINE = /^(\d{2})\.(\d{2})\.(\d{4}) (\d{2}:\d{2}:\d{2}\.\d{3}) \[([^\]]+)\] \*(\w+)\* \[([^\]]*)\] (.*)$/;
 
 interface LogEntry {
-  seq: number;          // 세션 내 단조 증가. 클라이언트 dedupe·범위 선택 키
-  ts: number;           // epoch ms (원본은 UTC)
+  seq: number;          // monotonic within a session. Key for client dedupe and range selection
+  ts: number;           // epoch ms (the source is UTC)
   level: 'ERROR' | 'WARN' | 'INFO' | 'DEBUG' | 'TRACE' | 'UNKNOWN';
   pod: string;          // cm-p33452-e121351-aem-author-...
   thread: string;
-  logger: string;       // message의 첫 토큰
+  logger: string;       // first token of the message
   message: string;
-  continuation: string[]; // 스택트레이스 등 후속 라인
+  continuation: string[]; // stack traces and other follow-on lines
   raw: string;
 }
 ```
 
-파서가 반드시 지켜야 할 것:
+What the parser must get right:
 
-- **정규식에 안 맞는 라인은 버리지 않는다.** 직전 엔트리의 `continuation`에 붙인다. 스택트레이스가 여기 들어온다. 직전 엔트리가 없으면 `level: 'UNKNOWN'`으로 단독 엔트리를 만든다.
-- **청크 경계에서 라인이 잘린다.** 마지막 개행 이후의 잔여 바이트는 다음 청크 앞에 이어붙인다.
-- **타임스탬프는 UTC다.** 내부는 전부 epoch ms로 다루고, 표시할 때만 KST로 변환한다. UI에 타임존 토글을 둔다.
-- 파서는 `LogParser` 인터페이스로 두고 `aemerror` 구현만 등록한다. `request.log` 등은 나중에 추가한다.
+- **Lines that do not match the regex are not discarded.** They attach to the previous
+  entry's `continuation` — this is where stack traces go. With no previous entry, make a
+  standalone entry with `level: 'UNKNOWN'`.
+- **Lines get cut at chunk boundaries.** Carry the bytes after the last newline and
+  prepend them to the next chunk.
+- **Timestamps are UTC.** Handle everything internally as epoch ms and convert to KST
+  only for display. Put a time zone toggle in the UI.
+- Define the parser behind a `LogParser` interface and register only the `aemerror`
+  implementation. `request.log` and others come later.
 
-### 6.5 마스킹
+### 6.5 Masking
 
-`MASKING_ENABLED=true`일 때 **파서 직후, 버퍼에 들어가기 전에** 적용한다. 렌더링 단계에서 가리는 방식은 금지한다 — 그러면 내보내기 파일에 원문이 그대로 나간다.
+When `MASKING_ENABLED=true`, apply it **right after parsing, before the buffer.**
+Redacting at render time is forbidden — that would put the original text in exported files.
 
-기본 규칙 (`parse/mask.ts`에 배열로 두고 확장 가능하게):
+Default rules (an extensible array in `parse/mask.ts`):
 
-| 대상 | 패턴 예 | 치환 |
+| Target | Example pattern | Replacement |
 |---|---|---|
-| Bearer 토큰 | `Bearer\s+[A-Za-z0-9._\-]{20,}` | `Bearer ***` |
-| Basic 인증 | `Basic\s+[A-Za-z0-9+/=]{16,}` | `Basic ***` |
-| 이메일 | 표준 이메일 패턴 | `a***@example.com` (도메인 유지) |
-| 주민등록번호 형태 | `\d{6}[-\s]?[1-4]\d{6}` | `******-*******` |
-| 쿼리스트링 민감 키 | `(password\|token\|secret\|apikey\|api_key)=[^&\s]+` | `$1=***` |
-| 신용카드 형태 | Luhn 검증을 통과하는 13~19자리 | `****-****-****-1234` |
+| Bearer token | `Bearer\s+[A-Za-z0-9._\-]{20,}` | `Bearer ***` |
+| Basic auth | `Basic\s+[A-Za-z0-9+/=]{16,}` | `Basic ***` |
+| Email | standard email pattern | `a***@example.com` (domain kept) |
+| Korean national ID shape | `\d{6}[-\s]?[1-4]\d{6}` | `******-*******` |
+| Sensitive query keys | `(password\|token\|secret\|apikey\|api_key)=[^&\s]+` | `$1=***` |
+| Card number shape | 13–19 digits passing Luhn | `****-****-****-1234` |
 
-마스킹된 엔트리에 `masked: true` 플래그를 달고 UI에서 작은 배지로 표시한다. 무엇이 가려졌는지 사용자가 알아야 한다.
+Flag masked entries with `masked: true` and show a small badge in the UI. The user needs
+to know something was redacted.
 
 ---
 
-## 7. 백엔드 API
+## 7. Backend API
 
-모든 응답은 JSON. 오류는 `{ error: { code, message } }`. 스택트레이스를 응답에 담지 않는다.
+All responses are JSON. Errors are `{ error: { code, message } }`. Stack traces never go
+in a response.
 
-### 인증
+### Authentication
 
 ```
-POST   /api/auth/login          { email, password } → 세션 쿠키 발급
+POST   /api/auth/login          { email, password } → issues a session cookie
 POST   /api/auth/logout
 GET    /api/auth/me             → { id, email, displayName, role, mustChangePassword, orgs: [{key,label,allowProd}] }
 POST   /api/auth/password       { currentPassword, newPassword }
 ```
 
-### 조직 · 환경
+### Organizations and environments
 
 ```
-GET    /api/orgs                                        → 세션 사용자에게 허용된 조직만
-GET    /api/orgs/:orgKey/environments?refresh=true      → env_cache 반환 (refresh=true면 Cloud Manager 재조회)
+GET    /api/orgs                                        → only organizations the session user may see
+GET    /api/orgs/:orgKey/environments?refresh=true      → returns env_cache (refresh=true refetches from Cloud Manager)
 GET    /api/orgs/:orgKey/environments/:envId/log-options
 ```
 
@@ -345,22 +382,24 @@ GET    /api/orgs/:orgKey/environments/:envId/log-options
 GET /api/tail?org={key}&env={id}&service={author|publish|preview}&name={aemerror}&levels=ERROR,WARN
 ```
 
-`text/event-stream`으로 응답. 이벤트 종류:
+Responds as `text/event-stream`. Event types:
 
 ```
 event: ready     data: { sessionId, bufferedCount, oldestSeq, newestSeq }
-event: entries   data: { entries: LogEntry[] }        // 배치. 100ms 디바운스 또는 500건마다
+event: entries   data: { entries: LogEntry[] }        // batched. 100ms debounce or every 500
 event: rollover  data: { newDate: "2026-08-29" }
 event: error     data: { code, message, recoverable }
-event: ping                                            // 15초마다. 프록시 타임아웃 방지
+event: ping                                            // every 15s, to defeat proxy timeouts
 ```
 
-- 레벨 필터는 **서버에서 적용**한다. ERROR만 보는데 INFO 수만 줄을 브라우저로 보낼 이유가 없다.
-- 링버퍼가 넘쳐 오래된 엔트리가 밀려나면 `event: truncated`로 알린다. 조용히 사라지면 안 된다.
+- The level filter is applied **on the server.** There is no reason to push tens of
+  thousands of INFO lines to a browser that is only showing ERROR.
+- When the ring buffer overflows and old entries are pushed out, say so with
+  `event: truncated`. They must not disappear silently.
 
-### 시간대 조회
+### Time-range search
 
-즉시 응답하지 않는다. 잡을 만들고 진행 상황을 스트리밍한다.
+Does not respond immediately. Create a job and stream progress.
 
 ```
 POST   /api/search
@@ -372,35 +411,41 @@ GET    /api/search/:jobId/stream   (SSE)
        event: entries   { entries: LogEntry[] }
        event: done      { matched, truncated }
 
-DELETE /api/search/:jobId          진행 중 취소
+DELETE /api/search/:jobId          cancel in progress
 ```
 
-스캔 구현: 요청 구간에 걸친 날짜별 파일을 순서대로 스트리밍으로 훑으며 파싱·필터한다. **전체를 메모리에 올리지 않는다.** `SEARCH_MAX_RESULT_LINES`에 도달하면 중단하고 `truncated: true`로 알린다.
+Scan implementation: walk the per-date files covering the requested range in order,
+streaming, parsing and filtering as you go. **Never load the whole thing into memory.**
+On reaching `SEARCH_MAX_RESULT_LINES`, stop and report `truncated: true`.
 
-날짜 경계 계산에 주의한다. 사용자가 KST로 "8/28 14:00~15:00"을 지정하면 UTC 기준 8/28 05:00~06:00이고, KST 오전 0~9시 구간은 **UTC 전날 파일**을 읽어야 한다.
+Be careful with date boundaries. When the user asks for "8/28 14:00–15:00" in KST that is
+8/28 05:00–06:00 UTC, and the 00:00–09:00 KST window has to read **the previous day's UTC
+file**.
 
-### 내보내기
+### Export
 
 ```
 POST   /api/export
        {
          source: 'tail' | 'search',
          sessionId | jobId,
-         seqFrom?, seqTo?,          // tail: 선택 구간
-         levels?[], query?,          // 추가 필터
+         seqFrom?, seqTo?,          // tail: the selected range
+         levels?[], query?,          // extra filters
          format: 'log' | 'json' | 'csv',
          includeContinuation: boolean
        }
        → { exportId, estimatedBytes }
 
-GET    /api/export/:exportId/download   → 스트리밍 응답, 다운로드 후 즉시 폐기
+GET    /api/export/:exportId/download   → streamed response, discarded immediately after
 ```
 
-- 서버 디스크에 임시 파일을 쓰지 않는다. 버퍼에서 바로 스트림으로 흘린다.
-- `EXPORT_MAX_BYTES` 초과 시 400과 함께 "범위를 좁히세요" 메시지를 반환한다.
-- `format: 'log'`는 원본 라인 그대로. `json`은 `LogEntry` 배열(JSONL). `csv`는 `ts,level,pod,thread,logger,message`.
+- No temporary file is written to server disk. Stream straight out of the buffer.
+- Over `EXPORT_MAX_BYTES`, return 400 with a "narrow the range" message.
+- `format: 'log'` is raw lines. `json` is an array of `LogEntry` (JSONL). `csv` is
+  `ts,level,pod,thread,logger,message`.
 
-**모든 내보내기 파일 첫머리에 출처 헤더를 넣는다** (`log`/`csv`는 주석 라인, `json`은 첫 객체):
+**Every exported file starts with a provenance header** (a comment line for `log`/`csv`,
+the first object for `json`):
 
 ```
 # AEM Cloud Log Viewer export
@@ -411,97 +456,119 @@ GET    /api/export/:exportId/download   → 스트리밍 응답, 다운로드 �
 # exported by shin@example.com at 2026-08-28T15:02:11+09:00
 ```
 
-며칠 뒤 이 파일이 어디서 왔는지 헷갈리지 않게 하는 것이 목적이다. 파일명도 고정 규칙을 쓴다:
+The point is that nobody is confused days later about where the file came from. The
+filename follows a fixed rule too:
 
 ```
 {orgKey}-p{programId}-e{envId}-{service}-{logName}-{fromYYYYMMDDTHHmm}_{toHHmm}.log
 ```
 
-### 관리자
+### Administration
 
 ```
 GET    /api/admin/users
 POST   /api/admin/users          { email, displayName, role, orgs: [{key, allowProd}] }
-                                 → 임시 비밀번호를 응답에 1회만 반환. 저장하지 않는다.
+                                 → returns a temporary password once, in the response. Never stored.
 PATCH  /api/admin/users/:id      { displayName?, role?, isActive?, orgs? }
-POST   /api/admin/users/:id/reset-password  → 새 임시 비밀번호 1회 반환
+POST   /api/admin/users/:id/reset-password  → returns a new temporary password once
 DELETE /api/admin/users/:id
 GET    /api/admin/audit?from&to&userId&action&orgKey&limit&offset
 ```
 
 ---
 
-## 8. 인증 · 인가
+## 8. Authentication and authorization
 
-### 로그인
+### Sign-in
 
-- 관리자가 발급하는 방식만 존재한다. **회원가입 엔드포인트를 만들지 않는다.**
-- 최초 부팅 시 `users`가 비어 있으면 `.env`의 `ADMIN_EMAIL` / `ADMIN_INITIAL_PASSWORD`로 관리자 1명을 생성하고 `must_change_password = 1`로 둔다. 콘솔에 안내를 출력한다. 이후 부팅에서는 이 로직을 타지 않는다.
-- 비밀번호는 argon2id. 최소 12자 검증.
-- `must_change_password`가 1이면 비밀번호 변경 외 모든 API를 403으로 막는다.
-- 로그인 실패는 이메일 단위로 5회 5분 레이트 리밋. 성공·실패 모두 `audit_log`에 남긴다.
+- Administrator-issued accounts only. **No sign-up endpoint is built.**
+- On first boot, if `users` is empty, create one administrator from `.env`'s
+  `ADMIN_EMAIL` / `ADMIN_INITIAL_PASSWORD` with `must_change_password = 1`, and print a
+  notice to the console. Later boots never take this path.
+- Passwords are argon2id, minimum 12 characters.
+- While `must_change_password` is 1, every API except the password change returns 403.
+- Failed sign-ins are rate limited per email: 5 attempts per 5 minutes. Both success and
+  failure go in `audit_log`.
 
-### 세션
+### Sessions
 
-- `httpOnly`, `SameSite=Strict`, `Path=/`. 로컬 HTTP 실행이 기본이라 `secure`는 환경변수로 토글한다.
-- SSE는 쿠키가 자동으로 실린다. WebSocket을 쓰지 않는 이유다.
-- 서버 재시작 시 세션 유지 (SQLite에 저장). 만료 세션은 부팅 시와 1시간 주기로 정리한다.
+- `httpOnly`, `SameSite=Strict`, `Path=/`. Since running over local HTTP is the default,
+  `secure` is toggled by an environment variable.
+- Cookies ride along on SSE automatically. That is why WebSocket is not used.
+- Sessions survive a server restart (stored in SQLite). Expired ones are cleaned at boot
+  and hourly.
 
-### 인가 체크 (모든 데이터 라우트에서)
+### Authorization checks (on every data route)
 
 ```
-1. 세션 유효한가
-2. 요청의 orgKey가 user_orgs에 있는가          → 없으면 404 (403 아님. 존재 여부를 흘리지 않는다)
-3. 대상 환경이 prod인가                         → 그렇다면 user_orgs.allow_prod 확인
-4. env_cache에서 (orgKey, envId) 쌍이 일치하는가 → 다른 조직의 환경 ID를 넘기는 시도 차단
-5. audit_log 기록
+1. Is the session valid
+2. Is the request's orgKey in user_orgs          → if not, 404 (not 403; do not leak existence)
+3. Is the target environment prod                → if so, check user_orgs.allow_prod
+4. Does (orgKey, envId) match in env_cache       → blocks passing another org's environment ID
+5. Record in audit_log
 ```
 
-3번을 별도로 두는 이유: 고객사 prod 로그에는 실사용자 데이터가 섞인다. 조직 접근 권한과 prod 열람 권한은 분리되어야 한다.
+Step 3 is separate because customer prod logs carry real end-user data. Organization
+access and prod access have to be distinct.
 
 ---
 
-## 9. 프론트엔드
+## 9. Frontend
 
-### 화면 구성
+### Screens
 
 ```
-/login                로그인
-/                     환경 선택 (조직 → 프로그램 → 환경 → 서비스/로그)
-/tail/:sessionKey     실시간 tail
-/search               시간대 조회
-/admin/users          계정 관리 (admin only)
-/admin/audit          감사 로그 (admin only)
+/login                sign-in
+/                     environment picker (org → program → environment → service/log)
+/tail/:sessionKey     live tail
+/search               time-range search
+/admin/users          user management (admin only)
+/admin/audit          audit log (admin only)
 ```
 
-**AppShell 구조**
+**AppShell structure**
 
-- Header: 좌측에 현재 조직·환경, 우측에 계정 메뉴. **환경 타입을 색으로 구분한다** — dev는 중립 회색, stage는 파랑, **prod는 붉은 계열**. prod를 보고 있다는 사실이 한눈에 들어와야 오조작이 준다.
-- Navbar: 조직 → 환경 트리. prod는 아이콘으로 한 번 더 표시.
-- Main: 로그 뷰.
+- Header: current organization and environment on the left, account menu on the right.
+  **Distinguish environment type by color** — dev neutral gray, stage blue, **prod in
+  reds**. Seeing at a glance that you are looking at prod reduces mistakes.
+- Navbar: organization → environment tree. Mark prod once more with an icon.
+- Main: the log view.
 
-### 로그 뷰어 컴포넌트
+### The log viewer component
 
-가장 중요한 컴포넌트다. 여기에 공을 들인다.
+The most important component. Put the effort here.
 
-- **가상 스크롤 필수.** 5만 라인을 DOM에 그리면 브라우저가 죽는다. `@tanstack/react-virtual`로 처리한다. 라인 높이가 가변(스택트레이스 펼침)이므로 `measureElement`를 쓴다.
-- **자동 스크롤 + 고정.** 하단에 붙어 있으면 새 로그를 따라가고, 사용자가 위로 스크롤하면 자동 추적을 멈추고 "새 로그 N건 — 맨 아래로" 버튼을 띄운다. 로그 뷰어의 기본 예의다.
-- **라인 렌더링:** 시각(모노스페이스, 흐린 색) / 레벨 배지 / 로거(축약, hover 시 전체) / 메시지. 스택트레이스는 접어두고 클릭하면 펼친다.
-- **레벨 색:** ERROR는 강한 강조 하나만. WARN은 중간. INFO/DEBUG는 배경과 거의 같은 톤. 로그 뷰어에서 모든 줄이 알록달록하면 아무것도 안 보인다. 강조는 ERROR 한 곳에만 쓴다.
-- **범위 선택:** 시작 라인 클릭 → Shift+클릭으로 끝 라인. 선택 구간이 하이라이트되고 하단에 "N줄 선택됨 · 내보내기" 액션바가 나타난다. **이게 이 도구의 시그니처 인터랙션이다.** 파일 전체를 받는 게 아니라 눈으로 보고 필요한 만큼만 집어가는 경험.
-- **하이라이트 검색:** 버퍼 내 즉시 필터. 정규식 토글.
-- **일시정지:** 스트림을 멈춰 화면을 고정한다. 서버 폴링은 계속되므로 재개하면 밀린 로그가 들어온다.
+- **Virtual scrolling is mandatory.** Painting 50k lines into the DOM kills the browser.
+  Use `@tanstack/react-virtual`. Row height varies (expanded stack traces), so use
+  `measureElement`.
+- **Follow and pin.** While pinned to the bottom, follow new logs; when the user scrolls
+  up, stop following and show a "N new lines — jump to bottom" button. Basic manners for
+  a log viewer.
+- **Line rendering:** time (monospace, dimmed) / level badge / logger (abbreviated, full
+  on hover) / message. Stack traces collapsed, expanded on click.
+- **Level colors:** one strong accent, for ERROR only. WARN in between. INFO/DEBUG almost
+  the same tone as the background. If every line in a log viewer is colorful, nothing
+  stands out. Spend the emphasis on ERROR alone.
+- **Range selection:** click the first line, Shift+click the last. The range highlights
+  and an action bar appears below: "N lines selected · Export". **This is the signature
+  interaction of the tool.** Not downloading a whole file, but looking and taking exactly
+  what you need.
+- **Highlight search:** instant filtering within the buffer. Regex toggle.
+- **Pause:** freeze the view. Server polling continues, so resuming brings in the backlog.
 
-### 시간대 조회 화면
+### Time-range search screen
 
-- `@mantine/dates`의 `DateTimePicker` 두 개. 프리셋 버튼("최근 1시간", "최근 6시간", "어제") 제공.
-- **기본 선택 레벨은 ERROR.** 이 화면의 주 용도가 그것이다.
-- 스캔 중에는 `Progress` 바와 함께 결과가 점진적으로 채워진다. 취소 버튼 상시 노출.
-- 결과는 tail 뷰어와 동일한 컴포넌트를 재사용한다. 범위 선택·내보내기도 동일하게 동작한다.
+- Two `DateTimePicker`s from `@mantine/dates`. Offer preset buttons ("last hour", "last 6
+  hours", "yesterday").
+- **The default level selection is ERROR.** That is what this screen is for.
+- During a scan, show a `Progress` bar while results fill in progressively. Keep a cancel
+  button visible at all times.
+- Results reuse the same component as the tail viewer. Range selection and export behave
+  identically.
 
-### Mantine v7 + Pretendard 설정
+### Mantine v7 + Pretendard setup
 
-Mantine v7은 Emotion을 쓰지 않는다. `@mantine/core/styles.css`를 **반드시 최상단에서** import 한다.
+Mantine v7 does not use Emotion. Import `@mantine/core/styles.css` **at the very top**.
 
 ```bash
 npm i @mantine/core @mantine/hooks @mantine/dates @mantine/notifications dayjs
@@ -509,7 +576,7 @@ npm i pretendard @fontsource/jetbrains-mono
 ```
 
 ```ts
-// web/src/main.tsx — import 순서가 중요하다
+// web/src/main.tsx — import order matters
 import 'pretendard/dist/web/variable/pretendardvariable.css';
 import '@fontsource/jetbrains-mono/400.css';
 import '@mantine/core/styles.css';
@@ -522,7 +589,7 @@ import './global.css';
 // web/src/theme.ts
 import { createTheme, MantineColorsTuple } from '@mantine/core';
 
-const slate: MantineColorsTuple = [/* 10단계 */];
+const slate: MantineColorsTuple = [/* 10 steps */];
 
 export const theme = createTheme({
   fontFamily:
@@ -543,82 +610,108 @@ export const theme = createTheme({
 <MantineProvider theme={theme} defaultColorScheme="dark">
 ```
 
-**다크 모드가 기본이다.** 로그를 오래 들여다보는 도구다. 라이트 모드도 동작은 하게 두되 기본값은 다크로 둔다.
+**Dark mode is the default.** This is a tool you stare at logs in for a long time. Light
+mode should work, but the default is dark.
 
-### 디자인 방향
+### Design direction
 
-이 도구의 성격은 "터미널을 대신하는 계기판"이다. 장식을 넣지 않는다.
+The character of this tool is "an instrument panel that replaces a terminal". No decoration.
 
-- 여백은 좁게, 정보 밀도는 높게. 한 화면에 최대한 많은 라인이 보여야 한다.
-- 색은 상태를 나타낼 때만 쓴다. 환경 타입(dev/stage/prod)과 로그 레벨(ERROR), 이 둘 외에는 무채색으로 간다.
-- 애니메이션은 스크롤 추적과 접힘/펼침 정도만. 로딩 스켈레톤에 힘주지 않는다.
-- 빈 상태는 다음 행동을 지시한다. "로그가 없습니다"가 아니라 "이 환경에는 최근 1시간 동안 ERROR가 없습니다. 레벨을 넓히거나 시간대를 바꿔보세요."
-- 버튼 문구는 실제로 일어나는 일을 그대로 쓴다. "제출"이 아니라 "선택 구간 내보내기".
-
----
-
-## 10. 구현 순서
-
-각 단계는 그 자체로 동작해야 한다. 전부 만들고 마지막에 붙이는 방식은 금지.
-
-**Phase 0 — 검증 (코드 작성 전)**
-실제 환경 하나로 다음을 확인하고 결과를 `docs/findings.md`에 기록한다. 여기서 나온 사실이 이후 설계를 바꿀 수 있다.
-1. `logs/download`가 반환하는 302 Location URL의 만료 시간
-2. **당일 파일이 gzip으로 오는가, 평문으로 오는가** — gzip이면 Range 바이트 오프셋으로 부분 디코딩이 안 되므로 tail 전략을 다시 짜야 한다. 가장 중요한 확인 항목이다
-3. 서명 URL이 `Range` 헤더에 `206 Partial Content`로 응답하는가
-4. 새 로그가 실제로 반영되기까지의 지연 (여러 번 측정해 중앙값)
-5. `logs?days=N` 응답 스키마 실물
-
-**Phase 1 — 골격**
-`.env` 로더 + zod 검증, SQLite 스키마·마이그레이션, Fastify 부팅, 최초 관리자 시딩, 로그인/로그아웃/세션, 최소 로그인 화면. 여기까지 되면 로그인해서 빈 화면을 볼 수 있다.
-
-**Phase 2 — Adobe 연동**
-IMS 토큰 캐시, Cloud Manager 클라이언트, 프로그램·환경 조회와 `env_cache` 적재, 환경 선택 화면. 여기까지 되면 조직별 환경 트리가 보인다.
-
-**Phase 3 — Tail**
-파서 + 마스킹 + 단위 테스트(멀티라인 스택, 청크 경계, **UTC 롤오버**), `TailSession` 폴링 루프, SSE 라우트, 가상 스크롤 뷰어, 자동 스크롤. 여기까지가 이 프로젝트의 절반이다.
-
-**Phase 4 — 조회와 내보내기**
-시간대 스캔 잡, 진행률 SSE, 조회 화면, 범위 선택 인터랙션, 세 가지 포맷 내보내기, 출처 헤더.
-
-**Phase 5 — 운영**
-관리자 계정 화면, 감사 로그 조회, prod 권한 분리 적용, 저장된 필터, README.
+- Tight spacing, high information density. As many lines on screen as possible.
+- Color only carries state. Environment type (dev/stage/prod) and log level (ERROR) —
+  everything else is achromatic.
+- Animation only for scroll following and collapse/expand. No effort into loading skeletons.
+- Empty states say what to do next. Not "no logs" but "no ERROR in this environment in
+  the last hour. Widen the level or change the time range."
+- Button text says what actually happens. Not "Submit" but "Export selection".
 
 ---
 
-## 11. 미확정 사항
+## 10. Build order
 
-구현 중 마주치면 임의로 결정하지 말고 기록한 뒤 물어본다.
+Each phase has to work on its own. Building everything and wiring it up at the end is
+forbidden.
 
-- **당일 로그 파일의 압축 여부** (Phase 0에서 확인). gzip이라면 대안은 두 가지다 — (a) 매 폴링마다 전체를 받아 압축 해제하고 이전과의 델타만 취한다(대역폭 손해가 크다), (b) 폴링 주기를 늘리고 마지막 N바이트만 받아 부분 해제를 시도한다. 확인 결과에 따라 결정한다.
-- Cloud Manager API의 정확한 레이트 리밋 수치. 429 응답의 `Retry-After`를 존중하는 지수 백오프를 넣어두고, 실제 한도는 관측으로 파악한다.
-- Additional Publish Region이 켜진 환경의 서비스 목록 형태. 리전별로 별도 항목으로 오는지 확인 후 UI에 반영한다.
-- `preview` 서비스가 없는 환경의 응답 형태.
+**Phase 0 — verification (before writing code)**
+Check the following against one real environment and record the result in
+`docs/findings.md`. What comes out of this can change the design that follows.
+1. The expiry of the 302 Location URL returned by `logs/download`
+2. **Does the current day's file come gzipped or plaintext** — if gzipped, Range byte
+   offsets cannot be partially decoded and the tail strategy has to be rethought. This is
+   the most important item
+3. Does the signed URL answer a `Range` header with `206 Partial Content`
+4. How long until a new log actually shows up (measure several times, take the median)
+5. The real response schema of `logs?days=N`
+
+**Phase 1 — skeleton**
+`.env` loader + zod validation, SQLite schema and migrations, Fastify boot, first-admin
+seeding, sign-in/sign-out/sessions, a minimal sign-in screen. At this point you can sign
+in and see an empty screen.
+
+**Phase 2 — Adobe integration**
+IMS token cache, Cloud Manager client, program and environment lookup into `env_cache`,
+the environment picker. At this point the per-organization environment tree is visible.
+
+**Phase 3 — tail**
+Parser + masking + unit tests (multiline stacks, chunk boundaries, **UTC rollover**), the
+`TailSession` polling loop, the SSE route, the virtual-scrolling viewer, follow mode.
+This is half the project.
+
+**Phase 4 — search and export**
+Time-range scan jobs, progress over SSE, the search screen, the range-selection
+interaction, export in three formats, the provenance header.
+
+**Phase 5 — operations**
+User management screen, audit log view, prod access separation, saved filters, README.
 
 ---
 
-## 12. 수용 기준
+## 11. Open questions
 
-- [ ] `.env`에 조직 2개를 등록하면 로그인 후 두 조직의 환경이 모두 보인다
-- [ ] `.env` 없이 실행하면 어떤 값이 빠졌는지 알려주며 즉시 종료한다
-- [ ] client secret이 HTTP 응답·프론트 번들·DB·로그 어디에도 나타나지 않는다 (grep으로 검증)
-- [ ] 조직 A만 가진 계정이 조직 B의 환경 ID를 직접 호출하면 404를 받는다
-- [ ] `allow_prod`가 없는 계정은 prod 환경 tail이 거부된다
-- [ ] 5만 라인이 쌓인 tail 화면에서 스크롤이 끊기지 않는다
-- [ ] 자동 추적 중 위로 스크롤하면 멈추고, 맨 아래로 돌아가면 재개된다
-- [ ] UTC 자정을 지나도 로그가 끊기지 않는다 (모의 시계 테스트)
-- [ ] 스택트레이스가 한 엔트리로 묶여 접힘/펼침이 동작한다
-- [ ] 내보낸 파일에 마스킹이 적용되어 있다
-- [ ] 내보낸 파일 첫머리에 조직·환경·범위·필터·요청자가 기록되어 있다
-- [ ] 500MB를 넘는 내보내기 요청은 거부되고 이유를 안내한다
-- [ ] 로그인·tail 시작·조회·내보내기가 `audit_log`에 남는다
-- [ ] 프로세스를 재시작하면 로그 본문은 사라지고 계정·설정·감사 기록은 남는다
+If you hit one of these during implementation, record it and ask rather than deciding
+unilaterally.
+
+- **Whether the current day's log file is compressed** (checked in Phase 0). If gzipped
+  there are two options — (a) download the whole thing each poll, decompress, and take
+  the delta (expensive in bandwidth), or (b) lengthen the poll interval, fetch only the
+  last N bytes, and attempt partial decompression. Decide based on the finding.
+- The exact Cloud Manager API rate limits. Put in exponential backoff that honors
+  `Retry-After` on 429, and learn the real limit by observation.
+- The shape of the service list for environments with Additional Publish Region enabled.
+  Check whether regions arrive as separate entries and reflect that in the UI.
+- The response shape for environments with no `preview` service.
 
 ---
 
-## 13. Claude Code에게
+## 12. Acceptance criteria
 
-- **Phase 0을 먼저 하고 결과를 보고한 뒤 Phase 1로 넘어간다.** 특히 gzip 여부를 확인하기 전에 tail 로직을 쓰지 않는다.
-- 파서와 롤오버 로직은 테스트를 먼저 쓴다. 이 두 곳에서 나는 버그는 조용해서 늦게 발견된다.
-- 새 의존성을 추가할 때는 이유를 한 줄로 남긴다. 이 도구는 오래 유지보수할 개인 도구이므로 의존성이 적을수록 좋다.
-- 6장의 Range 폴링 구조를 단순화하고 싶은 유혹이 생기면, 그게 이 도구가 존재하는 이유임을 기억한다. 파일 전체를 받는 코드를 쓰고 있다면 방향이 틀렸다.
+- [ ] Registering two organizations in `.env` shows both organizations' environments after sign-in
+- [ ] Running without `.env` exits immediately, naming the missing value
+- [ ] No client secret appears in an HTTP response, the frontend bundle, the DB or any log (verified by grep)
+- [ ] An account holding only org A gets a 404 when calling org B's environment ID directly
+- [ ] An account without `allow_prod` is refused a prod environment tail
+- [ ] Scrolling stays smooth on a tail screen holding 50k lines
+- [ ] Scrolling up during follow mode stops it; returning to the bottom resumes
+- [ ] Logs do not break across UTC midnight (tested with a mock clock)
+- [ ] Stack traces fold into one entry with working collapse/expand
+- [ ] Masking is applied in exported files
+- [ ] Exported files record organization, environment, range, filters and requester at the top
+- [ ] Export requests over 500MB are refused with an explanation
+- [ ] Sign-in, tail start, search and export all land in `audit_log`
+- [ ] Restarting the process loses log bodies but keeps accounts, config and audit records
+
+---
+
+## 13. Notes to the implementer
+
+This section was originally addressed to Claude Code, which wrote the implementation.
+
+- **Do Phase 0 first and report the result before moving to Phase 1.** In particular, do
+  not write the tail logic before confirming whether files are gzipped.
+- Write tests for the parser and the rollover logic first. Bugs in those two places are
+  quiet and get found late.
+- When adding a dependency, leave a one-line reason. This is a personal tool to be
+  maintained for a long time, so fewer dependencies is better.
+- If you feel tempted to simplify the Range polling structure in section 6, remember that
+  it is the reason this tool exists. If you are writing code that downloads a whole file,
+  you have gone the wrong way.

@@ -48,7 +48,7 @@ function redactUrl(url: string): string {
     const params = [...u.searchParams.keys()].sort();
     return `${u.origin}${u.pathname}?<${params.join(', ')}>`;
   } catch {
-    return '<파싱 불가>';
+    return '<unparseable>';
   }
 }
 
@@ -66,7 +66,7 @@ function median(xs: number[]): number {
 /** 값은 지우고 구조만 남긴다. 로그 본문·자격증명이 findings.md 에 새지 않게. */
 function shape(v: unknown, depth = 0): unknown {
   if (depth > 4) return '…';
-  if (Array.isArray(v)) return v.length === 0 ? [] : [shape(v[0], depth + 1), `…(${v.length}건)`];
+  if (Array.isArray(v)) return v.length === 0 ? [] : [shape(v[0], depth + 1), `…(${v.length} entries)`];
   if (v && typeof v === 'object') {
     const o: Record<string, unknown> = {};
     for (const [k, val] of Object.entries(v as Record<string, unknown>)) o[k] = shape(val, depth + 1);
@@ -83,32 +83,32 @@ async function main(): Promise<void> {
   const orgKey = arg('org') ?? [...cfg.orgs.keys()][0]!;
   const org = cfg.orgs.get(orgKey);
   if (!org) {
-    console.error(`조직 '${orgKey}' 가 .env 에 없다. 등록된 조직: ${[...cfg.orgs.keys()].join(', ')}`);
+    console.error(`Organization '${orgKey}' is not in .env. Registered: ${[...cfg.orgs.keys()].join(', ')}`);
     process.exit(1);
   }
 
   const ims = new ImsTokenCache();
   const cm = new CloudManagerClient(ims);
 
-  say(`# Phase 0 검증 결과`);
+  say(`# Phase 0 verification results`);
   say();
-  say(`- 실행 시각: ${iso(Date.now())}`);
-  say(`- 대상 조직: \`${org.key}\` (${org.label})`);
-  say(`- 표본 수: ${SAMPLES}, 폴링 간격: ${SAMPLE_INTERVAL_MS}ms`);
+  say(`- Run at: ${iso(Date.now())}`);
+  say(`- Organization: \`${org.key}\` (${org.label})`);
+  say(`- Samples: ${SAMPLES}, polling interval: ${SAMPLE_INTERVAL_MS}ms`);
 
   /* 0. IMS 토큰 */
-  section('0. IMS 토큰');
+  section('0. IMS token');
   const t0 = Date.now();
   await ims.getToken(org);
-  say(`- OK. 발급 소요 ${Date.now() - t0}ms (토큰 값은 기록하지 않는다)`);
+  say(`- OK. Issued in ${Date.now() - t0}ms (the token value is never recorded)`);
 
   /* 대상 환경 고르기 */
   const programId = arg('program') ?? (await pickProgram(cm, org));
   const { environmentId, environmentType } = await pickEnvironment(cm, org, programId, arg('env'));
-  say(`- 대상: program=${programId} environment=${environmentId} (${environmentType})`);
+  say(`- Target: program=${programId} environment=${environmentId} (${environmentType})`);
 
   /* 5. logs?days=N 응답 스키마 */
-  section('5. `logs?days=1` 응답 스키마 실물');
+  section('5. Real response schema of `logs?days=1`');
   const rawLogs = await rawJson(cm, org, `/api/program/${programId}/environment/${environmentId}/logs?days=1`);
   say('```json');
   say(JSON.stringify(shape(rawLogs), null, 2));
@@ -116,10 +116,10 @@ async function main(): Promise<void> {
 
   const options = await cm.listLogOptions(org, programId, environmentId, 1);
   say();
-  say('파싱된 옵션:');
+  say('Parsed options:');
   say('```');
   for (const o of options) say(`  service=${o.service} name=${o.name} date=${o.date ?? '-'}`);
-  if (options.length === 0) say('  (없음)');
+  if (options.length === 0) say('  (none)');
   say('```');
 
   const wantService = arg('service');
@@ -127,19 +127,19 @@ async function main(): Promise<void> {
   const target = pickLogOption(options, wantService, arg('name'));
   if (!target) {
     say();
-    say(`> **대상을 못 골랐다.** service=\`${wantService ?? '(지정 안 함)'}\` name=\`${wantName}\` 로 찾았다.`);
-    say(`> 이 환경에 있는 조합: ${[...new Set(options.map((o) => `${o.service}/${o.name}`))].join(', ') || '(없음)'}`);
+    say(`> **Could not pick a target.** Looked for service=\`${wantService ?? '(unspecified)'}\` name=\`${wantName}\`.`);
+    say(`> Combinations available here: ${[...new Set(options.map((o) => `${o.service}/${o.name}`))].join(', ') || '(none)'}`);
     say('>');
-    say('> `--service` / `--name` 을 위 목록에 있는 값으로 지정해 다시 실행한다.');
+    say('> Rerun with `--service` / `--name` set to one of the values above.');
     finish();
     return;
   }
   const date = target.date ?? new Date().toISOString().slice(0, 10);
   say();
-  say(`선택: service=\`${target.service}\` name=\`${target.name}\` date=\`${date}\``);
+  say(`Selected: service=\`${target.service}\` name=\`${target.name}\` date=\`${date}\``);
 
   /* 1. 302 Location 만료 */
-  section('1. 302 Location 서명 URL 의 만료 시간');
+  section('1. Expiry of the 302 Location signed URL');
   const issuedAt = Date.now();
   const signed = await cm.getSignedLogUrl(org, programId, environmentId, target.service, target.name, date);
 
@@ -150,25 +150,25 @@ async function main(): Promise<void> {
     try {
       tailUrl = (await cm.resolveSignedUrl(org, target.tailHref)).url;
     } catch (err) {
-      say(`- tail 링크 해석 실패: ${err instanceof Error ? err.message : String(err)}`);
+      say(`- Failed to resolve the tail link: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
-  say(`- URL 형태: \`${redactUrl(signed.url)}\``);
+  say(`- URL shape: \`${redactUrl(signed.url)}\``);
   if (signed.expiresAt !== undefined) {
     const ttlSec = Math.round((signed.expiresAt - issuedAt) / 1000);
-    say(`- 만료: ${iso(signed.expiresAt)} → 발급 시점 기준 **약 ${ttlSec}초 (${(ttlSec / 60).toFixed(1)}분)**`);
-    say(`- → 재발급 임계값은 이 값의 80% 지점을 쓴다.`);
+    say(`- Expires: ${iso(signed.expiresAt)} → **about ${ttlSec}s (${(ttlSec / 60).toFixed(1)} min)** from issue`);
+    say(`- → Use 80% of that as the refresh threshold.`);
   } else {
-    say('- 쿼리스트링에서 만료 파라미터를 찾지 못했다. (`se`/`X-Amz-Expires` 둘 다 없음)');
-    say('- → 만료를 예측할 수 없으므로 403/401 을 만나면 재발급하는 방식으로 간다.');
+    say('- No expiry parameter found in the query string (neither `se` nor `X-Amz-Expires`).');
+    say('- → Expiry cannot be predicted, so refetch on a 403/401 instead.');
   }
 
   /* 2. gzip 여부 — 가장 중요 */
-  section('2. 당일 파일이 gzip 인가 평문인가 ← 핵심');
-  say('`logs?days=N` 응답에는 링크가 둘 있고 가리키는 파일이 다르다. 둘 다 본다.');
+  section('2. Is the current day file gzipped or plaintext ← the key question');
+  say('The `logs?days=N` response has two links pointing at different files. Check both.');
   say();
   say(`- download: \`${redactUrl(signed.url)}\``);
-  say(`- tail:     ${tailUrl ? `\`${redactUrl(tailUrl)}\`` : '(없음)'}`);
+  say(`- tail:     ${tailUrl ? `\`${redactUrl(tailUrl)}\`` : '(none)'}`);
   say();
   const head = await fetch(signed.url, { headers: { Range: 'bytes=0-1023' } });
   const cr = head.headers.get('content-range');
@@ -180,36 +180,36 @@ async function main(): Promise<void> {
   const looksText = !isGzipMagic && isMostlyPrintable(first);
 
   say(`- HTTP ${head.status}`);
-  say(`- \`Content-Type\`: ${ct ?? '(없음)'}`);
-  say(`- \`Content-Encoding\`: ${ce ?? '(없음)'}`);
-  say(`- \`Content-Range\`: ${cr ?? '(없음)'}  → 전체 크기 ${totalBytes.toLocaleString()} bytes`);
-  say(`- 첫 2바이트: ${hex(first.slice(0, 2))} ${isGzipMagic ? '← gzip 매직(1f 8b)' : ''}`);
+  say(`- \`Content-Type\`: ${ct ?? '(none)'}`);
+  say(`- \`Content-Encoding\`: ${ce ?? '(none)'}`);
+  say(`- \`Content-Range\`: ${cr ?? '(none)'}  → total size ${totalBytes.toLocaleString()} bytes`);
+  say(`- First 2 bytes: ${hex(first.slice(0, 2))} ${isGzipMagic ? '← gzip magic (1f 8b)' : ''}`);
   say();
   if (isGzipMagic) {
-    say('### download 링크는 **gzip 이다**');
+    say('### The download link is **gzipped**');
     say();
-    say('이 파일은 Range 로 부분 디코딩이 안 되므로 실시간 tail 에 쓰지 않는다.');
-    say('하루치를 통째로 스트리밍하는 Phase 4 의 시간대 조회 전용이다.');
-    say('실시간 tail 은 아래 2b 의 평문 파일을 쓴다.');
+    say('Range requests cannot partially decode this file, so it is not used for live tail.');
+    say('It is only for Phase 4 time-range search, which streams a whole day.');
+    say('Live tail uses the plaintext file in 2b below.');
   } else if (looksText) {
-    say('### 결론: **평문이다**');
+    say('### Conclusion: **plaintext**');
     say();
-    say('SPEC 6.3 의 Range 폴링 tail 알고리즘을 그대로 쓸 수 있다.');
+    say('The Range-polling tail algorithm in SPEC 6.3 applies as written.');
     say('```');
     say(new TextDecoder().decode(first.slice(0, 200)).split('\n')[0] ?? '');
     say('```');
-    say('(첫 라인 한 줄만 발췌. 로그 본문은 findings.md 에 남기지 않는다)');
+    say('(One line only. Log bodies are never written to findings.md)');
   } else {
-    say('### 결론: **판정 불가** — 텍스트도 gzip 매직도 아니다. 위 헤더를 보고 사람이 판단한다.');
+    say('### Conclusion: **inconclusive** — neither text nor gzip magic. Judge from the headers above.');
   }
 
   /* 2b. tail 링크 (평문) */
-  section('2b. tail 링크 — 실시간 tail 이 실제로 쓰는 파일');
+  section('2b. The tail link — the file live tail actually uses');
 
   let tailSize = 0;
   let tailIsText = false;
   if (!tailUrl) {
-    say('- tail 링크가 없다. 이 환경/로그는 실시간 tail 을 지원하지 않는다.');
+    say('- No tail link. This environment/log does not support live tail.');
   } else {
     const th = await fetch(tailUrl, { headers: { Range: 'bytes=0-2047' } });
     const tb = new Uint8Array(await th.arrayBuffer());
@@ -218,59 +218,59 @@ async function main(): Promise<void> {
     const tGzip = tb.length >= 2 && tb[0] === 0x1f && tb[1] === 0x8b;
     tailIsText = !tGzip && isMostlyPrintable(tb);
 
-    say(`- HTTP ${th.status}, \`Accept-Ranges\`: ${th.headers.get('accept-ranges') ?? '(없음)'}`);
-    say(`- 첫 3바이트: ${hex(tb.slice(0, 3))} ${tGzip ? '← gzip' : ''}`);
-    say(`- 전체 크기: **${tailSize.toLocaleString()} bytes** (압축본 ${totalBytes.toLocaleString()} bytes 대비 ${totalBytes > 0 ? (tailSize / totalBytes).toFixed(1) : '?'}배)`);
+    say(`- HTTP ${th.status}, \`Accept-Ranges\`: ${th.headers.get('accept-ranges') ?? '(none)'}`);
+    say(`- First 3 bytes: ${hex(tb.slice(0, 3))} ${tGzip ? '← gzip' : ''}`);
+    say(`- Total size: **${tailSize.toLocaleString()} bytes** (${totalBytes > 0 ? (tailSize / totalBytes).toFixed(1) : '?'}× the ${totalBytes.toLocaleString()}-byte compressed copy)`);
     say();
-    say(tailIsText ? '### 평문이다 ✅ SPEC 6.3 을 그대로 쓴다' : '### 평문이 아니다 ⚠️ tail 전략을 다시 봐야 한다');
+    say(tailIsText ? '### It is plaintext ✅ SPEC 6.3 applies as written' : '### Not plaintext ⚠️ the tail strategy needs rethinking');
   }
 
   /* 3. Range → 206 */
-  section('3. 서명 URL 의 Range 지원');
-  say(`- \`Range: bytes=0-1023\` → HTTP **${head.status}** ${head.status === 206 ? '(206 Partial Content — 지원)' : '(206 아님)'}`);
-  say(`- \`Accept-Ranges\`: ${head.headers.get('accept-ranges') ?? '(없음)'}`);
+  section('3. Range support on the signed URL');
+  say(`- \`Range: bytes=0-1023\` → HTTP **${head.status}** ${head.status === 206 ? '(206 Partial Content — supported)' : '(not 206)'}`);
+  say(`- \`Accept-Ranges\`: ${head.headers.get('accept-ranges') ?? '(none)'}`);
 
   if (totalBytes > 0) {
     const from = Math.max(0, totalBytes - 4096);
     const tailRes = await fetch(signed.url, { headers: { Range: `bytes=${from}-` } });
-    say(`- 꼬리 \`Range: bytes=${from}-\` → HTTP **${tailRes.status}**, ${(await tailRes.arrayBuffer()).byteLength} bytes 수신`);
+    say(`- Tail \`Range: bytes=${from}-\` → HTTP **${tailRes.status}**, ${(await tailRes.arrayBuffer()).byteLength} bytes received`);
 
     const past = await fetch(signed.url, { headers: { Range: `bytes=${totalBytes}-` } });
-    say(`- 파일 끝 너머 \`Range: bytes=${totalBytes}-\` → HTTP **${past.status}** ${past.status === 416 ? '(416 — 새 데이터 없음 판정에 쓸 수 있다)' : '(416 이 아니다. 새 데이터 없음 판정 방식을 다시 정해야 한다)'}`);
+    say(`- Past end of file \`Range: bytes=${totalBytes}-\` → HTTP **${past.status}** ${past.status === 416 ? '(416 — usable as the no-new-data signal)' : '(not 416. The no-new-data check needs rethinking)'}`);
     await past.body?.cancel();
   }
 
   /* 4. 반영 지연 */
-  section('4. 새 로그 반영 지연');
-  say(`평문 tail 파일의 끝을 ${SAMPLE_INTERVAL_MS}ms 간격으로 ${SAMPLES}회 읽어, 새로 나타난 마지막 라인의 타임스탬프와 관측 시각의 차이를 잰다.`);
+  section('4. Delay before new logs appear');
+  say(`Read the end of the plaintext tail file ${SAMPLES} times at ${SAMPLE_INTERVAL_MS}ms intervals and measure the gap between the newest line's timestamp and the observation time.`);
   say();
   if (!tailUrl || !tailIsText) {
-    say('> 평문 tail URL 이 없어 잴 수 없다. 2b 절을 먼저 확인한다.');
+    say('> No plaintext tail URL, so this cannot be measured. Check section 2b first.');
   } else {
     const delays = await measureIngestDelay(tailUrl, tailSize);
     say('```');
     for (const [i, d] of delays.entries()) {
       const label =
         d.kind === 'no-data'
-          ? '증가 없음 (flush 대기 중)'
+          ? 'no growth (waiting for a flush)'
           : d.kind === 'unparsed'
-            ? `${d.bytes.toLocaleString()} bytes 받았으나 타임스탬프를 못 읽음 ← 파서 확인 필요`
-            : `${(d.delayMs / 1000).toFixed(1)}초 지연 (${d.bytes.toLocaleString()} bytes)`;
-      say(`  표본 ${i + 1}: ${label}`);
+            ? `received ${d.bytes.toLocaleString()} bytes but could not read a timestamp ← check the parser`
+            : `${(d.delayMs / 1000).toFixed(1)}s delay (${d.bytes.toLocaleString()} bytes)`;
+      say(`  sample ${i + 1}: ${label}`);
     }
     say('```');
     const ok = delays.filter((d): d is Extract<Sample, { kind: 'ok' }> => d.kind === 'ok').map((d) => d.delayMs);
     const grew = delays.filter((d) => d.kind !== 'no-data').length;
     say();
-    say(`- 데이터가 온 폴링: ${grew}/${delays.length}회. 나머지는 flush 사이의 빈 구간이다.`);
+    say(`- Polls that returned data: ${grew}/${delays.length}. The rest fell between flushes.`);
     if (ok.length > 0) {
-      say(`- **반영 지연 중앙값 ${(median(ok) / 1000).toFixed(1)}초** (표본 ${ok.length}건)`);
-      say(`- 이 지연은 Adobe 쪽 파이프라인 지연이다. 폴링을 아무리 자주 해도 줄지 않는다.`);
+      say(`- **Median propagation delay ${(median(ok) / 1000).toFixed(1)}s** (${ok.length} samples)`);
+      say(`- This is Adobe-side pipeline delay. Polling more often does not reduce it.`);
     } else {
-      say('- **측정 구간에 새 로그가 없었다.** 이 값은 지연이 아니라 "트래픽 없음"이다.');
-      say('- 이 스크립트가 도는 동안 대상 환경에 요청을 보내야 한다.');
-      say(`- aemerror 는 error.log 라 일반 요청으로는 조용할 수 있다. 오류를 유발하는 요청을 섞거나`);
-      say('  `--interval 15000 --samples 10` 으로 창을 넓힌다.');
+      say('- **No new logs during the measurement.** This reflects no traffic, not a delay.');
+      say('- Send requests to the target environment while this script runs.');
+      say(`- aemerror is an error log, so ordinary requests may leave it silent. Mix in requests that cause errors, or`);
+      say('  widen the window with `--interval 15000 --samples 10`.');
     }
   }
 
@@ -278,14 +278,14 @@ async function main(): Promise<void> {
 }
 
 function finish(): void {
-  section('결정이 필요한 사항');
+  section('Decisions needed');
   say();
-  say('- [x] tail 전략: `logs/tail` 의 평문 파일에 Range 폴링 (Phase 0b 에서 확정)');
-  say('- [ ] 4번의 반영 지연 중앙값에 맞춰 `TAIL_POLL_INTERVAL_MS` 조정');
+  say('- [x] Tail strategy: Range polling against the plaintext file from `logs/tail` (settled in Phase 0b)');
+  say('- [ ] Tune `TAIL_POLL_INTERVAL_MS` to the median delay from section 4');
 
   mkdirSync('docs', { recursive: true });
   writeFileSync('docs/findings.md', out.join('\n') + '\n', 'utf8');
-  console.log('\n→ docs/findings.md 에 기록했다.');
+  console.log('\n→ Written to docs/findings.md');
 }
 
 /* ── 헬퍼 ────────────────────────────────────────────── */
@@ -307,7 +307,7 @@ function isMostlyPrintable(b: Uint8Array): boolean {
 async function pickProgram(cm: CloudManagerClient, org: OrgConfig): Promise<string> {
   const programs = await cm.listPrograms(org);
   if (programs.length === 0) throw new Error('프로그램이 없다. 자격증명의 권한을 확인한다.');
-  say(`- 프로그램 ${programs.length}개: ${programs.map((p) => `${p.id}(${p.name})`).join(', ')}`);
+  say(`- ${programs.length} program(s): ${programs.map((p) => `${p.id}(${p.name})`).join(', ')}`);
   return programs[0]!.id;
 }
 
@@ -319,7 +319,7 @@ async function pickEnvironment(
 ): Promise<{ environmentId: string; environmentType: string }> {
   const envs = await cm.listEnvironments(org, programId);
   if (envs.length === 0) throw new Error(`program ${programId} 에 환경이 없다.`);
-  say(`- 환경 ${envs.length}개: ${envs.map((e) => `${e.id}(${e.name}/${e.type})`).join(', ')}`);
+  say(`- ${envs.length} environment(s): ${envs.map((e) => `${e.id}(${e.name}/${e.type})`).join(', ')}`);
   // prod 를 기본 대상으로 삼지 않는다. dev 를 우선한다.
   const chosen = wanted ? envs.find((e) => e.id === wanted) : (envs.find((e) => e.type === 'dev') ?? envs[0]);
   if (!chosen) throw new Error(`환경 ${wanted} 을 찾을 수 없다.`);
@@ -394,6 +394,6 @@ async function measureIngestDelay(url: string, startSize: number): Promise<Sampl
 }
 
 main().catch((err) => {
-  console.error(`\n[Phase 0 실패] ${err instanceof Error ? err.message : String(err)}`);
+  console.error(`\n[Phase 0 failed] ${err instanceof Error ? err.message : String(err)}`);
   process.exit(1);
 });

@@ -42,7 +42,7 @@ function redactUrl(url: string): string {
     const u = new URL(url);
     return `${u.origin}${u.pathname}?<${[...u.searchParams.keys()].sort().join(', ')}>`;
   } catch {
-    return '<파싱 불가>';
+    return '<unparseable>';
   }
 }
 
@@ -93,23 +93,23 @@ async function main(): Promise<void> {
   const orgKey = arg('org') ?? [...cfg.orgs.keys()][0]!;
   const org = cfg.orgs.get(orgKey);
   if (!org) {
-    console.error(`조직 '${orgKey}' 가 .env 에 없다. 등록된 조직: ${[...cfg.orgs.keys()].join(', ')}`);
+    console.error(`Organization '${orgKey}' is not in .env. Registered: ${[...cfg.orgs.keys()].join(', ')}`);
     process.exit(1);
   }
 
   const ims = new ImsTokenCache();
   const cm = new CloudManagerClient(ims);
 
-  say('# Phase 0b — gzip tail 전략 조사');
+  say('# Phase 0b — investigating the gzip tail strategy');
   say();
-  say(`- 실행 시각: ${new Date().toISOString()}`);
-  say(`- 대상 조직: \`${org.key}\``);
+  say(`- Run at: ${new Date().toISOString()}`);
+  say(`- Organization: \`${org.key}\``);
 
   const programId = arg('program') ?? (await cm.listPrograms(org))[0]!.id;
   const envs = await cm.listEnvironments(org, programId);
   const envId = arg('env') ?? (envs.find((e) => e.type === 'dev') ?? envs[0]!).id;
   const envType = envs.find((e) => e.id === envId)?.type ?? '?';
-  say(`- 대상: program=${programId} environment=${envId} (${envType})`);
+  say(`- Target: program=${programId} environment=${envId} (${envType})`);
 
   const options = await cm.listLogOptions(org, programId, envId, 1);
   const today = new Date().toISOString().slice(0, 10);
@@ -120,24 +120,24 @@ async function main(): Promise<void> {
     options.find((o) => o.service === service && o.name === name);
 
   if (!target) {
-    say(`\n> service=${service} name=${name} 옵션을 찾지 못했다.`);
+    say(`\n> No option found for service=${service} name=${name}.`);
     finish();
     return;
   }
-  say(`- 선택: service=\`${target.service}\` name=\`${target.name}\` date=\`${target.date}\``);
+  say(`- Selected: service=\`${target.service}\` name=\`${target.name}\` date=\`${target.date}\``);
 
   /* ── A. tail 링크 ─────────────────────────────────── */
-  section('A. `logs/tail` 링크 조사 ← 이게 되면 (a)/(b) 둘 다 불필요');
+  section('A. Investigating the `logs/tail` link ← if this works, neither (a) nor (b) is needed');
 
   if (!target.tailHref) {
-    say('- 이 항목에 tail 링크가 없다. B 로 넘어간다.');
+    say('- This entry has no tail link. Moving on to B.');
   } else {
     say(`- tail href: \`${redactUrl(target.tailHref)}\``);
-    say(`- 경로: \`${(() => { try { return new URL(target.tailHref!).pathname; } catch { return target.tailHref!; } })()}\``);
+    say(`- Path: \`${(() => { try { return new URL(target.tailHref!).pathname; } catch { return target.tailHref!; } })()}\``);
     try {
       const signed = await cm.resolveSignedUrl(org, target.tailHref);
-      say(`- 서명 URL: \`${redactUrl(signed.url)}\``);
-      say(`- 만료: ${signed.expiresAt ? new Date(signed.expiresAt).toISOString() : '(파라미터 없음)'}`);
+      say(`- Signed URL: \`${redactUrl(signed.url)}\``);
+      say(`- Expires: ${signed.expiresAt ? new Date(signed.expiresAt).toISOString() : '(no parameter)'}`);
 
       const res = await fetch(signed.url, { headers: { Range: 'bytes=0-4095' } });
       const buf = new Uint8Array(await res.arrayBuffer());
@@ -146,129 +146,129 @@ async function main(): Promise<void> {
       const gz = isGzipStart(buf);
 
       say(`- HTTP ${res.status}, \`Content-Type\`: ${res.headers.get('content-type') ?? '-'}`);
-      say(`- \`Content-Encoding\`: ${res.headers.get('content-encoding') ?? '(없음)'}`);
-      say(`- \`Content-Range\`: ${cr ?? '(없음)'} → 전체 ${total.toLocaleString()} bytes`);
-      say(`- 첫 3바이트: ${hex(buf.slice(0, 3))} ${gz ? '← gzip' : ''}`);
+      say(`- \`Content-Encoding\`: ${res.headers.get('content-encoding') ?? '(none)'}`);
+      say(`- \`Content-Range\`: ${cr ?? '(none)'} → total ${total.toLocaleString()} bytes`);
+      say(`- First 3 bytes: ${hex(buf.slice(0, 3))} ${gz ? '← gzip' : ''}`);
 
       const text = gz ? (gunzipPartial(buf) ?? '') : new TextDecoder().decode(buf);
       say();
       if (!gz && isLogText(text)) {
-        say('### 결론: tail 링크는 **평문이다** ✅');
+        say('### Conclusion: the tail link is **plaintext** ✅');
         say();
-        say('SPEC 6.3 의 Range 폴링을 이 URL 에 대고 그대로 쓴다. gzip 문제가 사라진다.');
-        say('다운로드 링크(.gz)는 시간대 조회(Phase 4)에서 하루치를 훑을 때만 쓴다.');
+        say('Apply SPEC 6.3 Range polling to this URL as written. The gzip problem disappears.');
+        say('The download link (.gz) is only for scanning a whole day in time-range search (Phase 4).');
       } else if (gz) {
-        say('### tail 링크도 gzip 이다. B 의 멀티멤버 여부가 결정한다.');
+        say('### The tail link is gzipped too. Whether B is multi-member decides it.');
       } else {
-        say('### 결론 보류 — 평문도 로그 형식도 아니다. 아래 헤더를 보고 판단한다.');
+        say('### Inconclusive — neither plaintext nor log-shaped. Judge from the headers below.');
       }
       say('```');
       say(
-        (text.split('\n').find((l) => l.trim().length > 0) ?? '(빈 응답)').slice(0, 160),
+        (text.split('\n').find((l) => l.trim().length > 0) ?? '(empty response)').slice(0, 160),
       );
       say('```');
-      say('(첫 한 줄만 발췌)');
+      say('(first line only)');
     } catch (err) {
-      say(`- tail 링크 호출 실패: ${err instanceof Error ? err.message : String(err)}`);
-      say('- → 권한 부족이거나 이 환경에서 미지원. B 로 판단한다.');
+      say(`- Calling the tail link failed: ${err instanceof Error ? err.message : String(err)}`);
+      say('- → Either insufficient permission or unsupported here. Decide from B.');
     }
   }
 
   /* ── B. 멀티멤버 gzip 여부 ────────────────────────── */
-  section('B. `.gz` 가 멀티멤버인가 ← 되면 SPEC 6.3 이 거의 그대로 산다');
+  section('B. Is the `.gz` multi-member ← if so, SPEC 6.3 survives nearly intact');
 
   const dl = target.downloadHref
     ? await cm.resolveSignedUrl(org, target.downloadHref)
     : await cm.getSignedLogUrl(org, programId, envId, target.service, target.name, target.date ?? today);
 
   const size = await sizeOf(dl.url);
-  say(`- 파일 크기: ${size.toLocaleString()} bytes`);
+  say(`- File size: ${size.toLocaleString()} bytes`);
 
   // 1) 파일 맨 앞이 gzip 인 건 Phase 0 에서 확인했다. 꼬리에도 멤버 경계가 있는지 본다.
   const tailWindow = Math.min(size, 512 * 1024);
   const tailRes = await fetch(dl.url, { headers: { Range: `bytes=${size - tailWindow}-` } });
   const tailBuf = new Uint8Array(await tailRes.arrayBuffer());
-  say(`- 꼬리 ${tailWindow.toLocaleString()} bytes 를 받아 멤버 경계를 찾는다.`);
+  say(`- Fetch the last ${tailWindow.toLocaleString()} bytes and look for member boundaries.`);
 
   const boundaries = findMemberBoundaries(tailBuf);
-  say(`- 검증된 멤버 시작 오프셋: ${boundaries.length}개 ${boundaries.length > 0 ? `(창 내 상대 위치 ${boundaries.slice(0, 8).join(', ')}${boundaries.length > 8 ? ' …' : ''})` : ''}`);
+  say(`- Verified member start offsets: ${boundaries.length} ${boundaries.length > 0 ? `(relative positions in the window ${boundaries.slice(0, 8).join(', ')}${boundaries.length > 8 ? ' …' : ''})` : ''}`);
 
   say();
   if (boundaries.length > 0) {
     const last = boundaries[boundaries.length - 1]!;
     const decoded = gunzipPartial(tailBuf.subarray(last)) ?? '';
     const lines = decoded.split('\n').filter((l) => l.trim().length > 0);
-    say('### 결론: **멀티멤버 gzip 이다** ✅');
+    say('### Conclusion: **multi-member gzip** ✅');
     say();
-    say(`마지막 멤버(파일 오프셋 ${(size - tailWindow + last).toLocaleString()})부터 해제해 ${lines.length}줄을 읽었다.`);
-    say(`로그 형식 확인: ${isLogText(decoded) ? '통과' : '실패 — 사람이 확인 필요'}`);
+    say(`Decompressed from the last member (file offset ${(size - tailWindow + last).toLocaleString()}) and read ${lines.length} lines.`);
+    say(`Log-format check: ${isLogText(decoded) ? 'pass' : 'fail — needs a human'}`);
     say();
-    say('이러면 SPEC 6.3 을 이렇게만 고쳐 쓴다:');
+    say('If so, SPEC 6.3 needs only these adjustments:');
     say('```');
-    say('  offset 은 압축 바이트 기준으로 유지한다');
-    say('  Range: bytes={offset}- 로 받은 델타는 완결된 멤버들의 연속이다');
-    say('  → 그대로 gunzip 에 흘려 평문 라인을 얻는다 (Node zlib 은 연결된 멤버를 알아서 처리한다)');
-    say('  → 마지막 멤버가 잘렸으면 그 바이트는 소비하지 않고 다음 폴링으로 넘긴다');
+    say('  keep the offset in compressed bytes');
+    say('  the delta from Range: bytes={offset}- is a run of complete members');
+    say('  → pipe it straight to gunzip for plaintext lines (Node zlib handles concatenated members)');
+    say('  → if the last member is truncated, leave those bytes for the next poll');
     say('```');
-    say('대역폭은 평문 tail 과 같은 수준(오히려 압축된 만큼 적다). (a) 도 (b) 도 필요 없다.');
+    say('Bandwidth matches the plaintext tail (less, in fact, by the compression ratio). Neither (a) nor (b) is needed.');
   } else {
-    say('### 결론: **단일 스트림 gzip 이다** ⚠️');
+    say('### Conclusion: **single-stream gzip** ⚠️');
     say();
-    say('꼬리에서 멤버 경계를 찾지 못했다. Range 로 받은 델타만 따로 해제할 수 없다.');
-    say('A 의 tail 링크가 평문이 아니었다면 SPEC 11장 (a)/(b) 중에서 골라야 한다.');
+    say('No member boundary found in the tail. A delta fetched by Range cannot be decompressed on its own.');
+    say('Had the tail link in A not been plaintext, we would have to pick between (a) and (b) in SPEC section 11.');
   }
 
   /* ── C. 증가 속도 ─────────────────────────────────── */
-  section('C. 증가 속도 — 전체 재다운로드(a) 를 골랐을 때의 비용');
+  section('C. Growth rate — the cost if option (a), full re-download, were chosen');
 
-  say(`${GROWTH_WAIT_MS / 1000}초 기다렸다가 다시 잰다.`);
+  say(`Wait ${GROWTH_WAIT_MS / 1000}s and measure again.`);
   await new Promise((r) => setTimeout(r, GROWTH_WAIT_MS));
   const size2 = await sizeOf(dl.url);
   const grew = size2 - size;
 
   say('```');
-  say(`  이전: ${size.toLocaleString()} bytes`);
-  say(`  이후: ${size2.toLocaleString()} bytes`);
-  say(`  증가: ${grew.toLocaleString()} bytes / ${GROWTH_WAIT_MS / 1000}초`);
+  say(`  before: ${size.toLocaleString()} bytes`);
+  say(`  after:  ${size2.toLocaleString()} bytes`);
+  say(`  growth: ${grew.toLocaleString()} bytes / ${GROWTH_WAIT_MS / 1000}s`);
   say('```');
 
   if (grew > 0) {
     const perPoll = (grew / (GROWTH_WAIT_MS / 1000)) * (cfg.TAIL_POLL_INTERVAL_MS / 1000);
-    say(`- 델타 방식이면 폴링(${cfg.TAIL_POLL_INTERVAL_MS}ms)당 약 **${Math.round(perPoll).toLocaleString()} bytes**`);
-    say(`- 전체 재다운로드(a) 면 폴링당 **${size2.toLocaleString()} bytes** — ${Math.round(size2 / Math.max(perPoll, 1))}배`);
-    say(`- 하루 환산: (a) 는 세션 하나당 약 ${((size2 * (86400_000 / cfg.TAIL_POLL_INTERVAL_MS)) / 1024 ** 3).toFixed(1)} GB`);
+    say(`- With deltas, about **${Math.round(perPoll).toLocaleString()} bytes** per poll (${cfg.TAIL_POLL_INTERVAL_MS}ms)`);
+    say(`- With full re-download (a), **${size2.toLocaleString()} bytes** per poll — ${Math.round(size2 / Math.max(perPoll, 1))}×`);
+    say(`- Per day: (a) is about ${((size2 * (86400_000 / cfg.TAIL_POLL_INTERVAL_MS)) / 1024 ** 3).toFixed(1)} GB per session`);
 
     // 멀티멤버라면 실제로 델타가 독립 해제되는지 여기서 최종 확인한다.
     const deltaRes = await fetch(dl.url, { headers: { Range: `bytes=${size}-` } });
     const delta = new Uint8Array(await deltaRes.arrayBuffer());
     say();
-    say(`- 증가분 첫 3바이트: ${hex(delta.slice(0, 3))} ${isGzipStart(delta) ? '← 새 멤버로 시작한다 ✅' : '← 멤버 경계가 아니다'}`);
+    say(`- First 3 bytes of the growth: ${hex(delta.slice(0, 3))} ${isGzipStart(delta) ? '← starts a new member ✅' : '← not a member boundary'}`);
     if (isGzipStart(delta)) {
       const t = gunzipPartial(delta);
-      say(`- 증가분만 독립 해제: ${t !== null ? `성공, ${t.split('\n').filter((l) => l.trim()).length}줄` : '실패'}`);
-      if (t) say(`- 로그 형식 확인: ${isLogText(t) ? '통과 ✅' : '실패'}`);
+      say(`- Decompressing the growth alone: ${t !== null ? `ok, ${t.split('\n').filter((l) => l.trim()).length} lines` : 'failed'}`);
+      if (t) say(`- Log-format check: ${isLogText(t) ? 'pass ✅' : 'fail'}`);
     }
   } else {
-    say('- 측정 구간에 파일이 자라지 않았다. 트래픽이 있는 시간대나 환경에서 다시 실행한다.');
-    say(`- \`--wait 300000\` 으로 대기 시간을 늘려볼 수 있다.`);
+    say('- The file did not grow during the measurement. Rerun during a busier window or environment.');
+    say(`- \`--wait 300000\` lengthens the wait.`);
   }
 
   finish();
 }
 
 function finish(): void {
-  section('결정');
+  section('Decisions');
   say();
-  say('- [ ] A 가 평문 → tail 링크로 간다. 가장 깔끔하다');
-  say('- [ ] A 는 아니지만 B 가 멀티멤버 → SPEC 6.3 + 멤버 단위 해제');
-  say('- [ ] 둘 다 아니면 → SPEC 11장 (a)/(b) 중 선택. C 의 대역폭 수치로 판단한다');
+  say('- [ ] A is plaintext → go with the tail link. Cleanest option');
+  say('- [ ] Not A but B is multi-member → SPEC 6.3 plus per-member decompression');
+  say('- [ ] Neither → pick (a) or (b) from SPEC section 11, using the bandwidth numbers in C');
 
   mkdirSync('docs', { recursive: true });
   writeFileSync('docs/findings-0b.md', out.join('\n') + '\n', 'utf8');
-  console.log('\n→ docs/findings-0b.md 에 기록했다.');
+  console.log('\n→ Written to docs/findings-0b.md');
 }
 
 main().catch((err) => {
-  console.error(`\n[Phase 0b 실패] ${err instanceof Error ? err.message : String(err)}`);
+  console.error(`\n[Phase 0b failed] ${err instanceof Error ? err.message : String(err)}`);
   process.exit(1);
 });
