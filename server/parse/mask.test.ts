@@ -76,7 +76,7 @@ describe('마스킹 — 건드리면 안 되는 것 (오탐)', () => {
   });
 
   test('pod 이름을 건드리지 않는다', () => {
-    const line = 'cm-p33452-e121351-aem-author-54c7ddc56c-vf8vb';
+    const line = 'cm-p12345-e987654-aem-author-54c7ddc56c-vf8vb';
     assert.equal(mask(line), line);
   });
 

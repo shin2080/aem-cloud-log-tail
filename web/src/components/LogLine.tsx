@@ -61,7 +61,7 @@ function datePrefix(ts: number, mode: TimeZoneMode): string | null {
 }
 
 /**
- * 'cm-p33452-e121351-aem-author-54c7ddc56c-vf8vb' → 'vf8vb'
+ * 'cm-p12345-e987654-aem-author-54c7ddc56c-vf8vb' → 'vf8vb'
  *
  * 같은 환경 안에서는 앞이 전부 같고 끝 조각만 다르다. 그 조각이 곧 '어느 인스턴스' 다.
  * cdn 의 pod 자리에는 호스트가 오는데 그건 자르지 않는다 — 'com' 만 남으면 곤란하다.

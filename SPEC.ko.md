@@ -283,7 +283,7 @@ Headers:
 `aemerror` 라인 포맷:
 
 ```
-25.09.2023 15:34:56.428 [cm-p33452-e121351-aem-author-54c7ddc56c-vf8vb] *INFO* [sling-oak-observation-5] com.adobe.cq.Foo 메시지 본문
+25.09.2023 15:34:56.428 [cm-p12345-e987654-aem-author-54c7ddc56c-vf8vb] *INFO* [sling-oak-observation-5] com.adobe.cq.Foo 메시지 본문
 ```
 
 ```ts
@@ -293,7 +293,7 @@ interface LogEntry {
   seq: number;          // 세션 내 단조 증가. 클라이언트 dedupe·범위 선택 키
   ts: number;           // epoch ms (원본은 UTC)
   level: 'ERROR' | 'WARN' | 'INFO' | 'DEBUG' | 'TRACE' | 'UNKNOWN';
-  pod: string;          // cm-p33452-e121351-aem-author-...
+  pod: string;          // cm-p12345-e987654-aem-author-...
   thread: string;
   logger: string;       // message의 첫 토큰
   message: string;

@@ -43,7 +43,8 @@ better. When adding one, leave a one-line reason here.
   whose fixes landed only in 5 (`sendWebStream` memory, Content-Type bypass,
   `X-Forwarded-*` spoofing). Node 20+ was already required, so this moved to 5.
   `@fastify/cookie` 11 and `@fastify/static` 10 follow from that. The APIs used here are
-  unchanged. `npm audit` reports zero.
+  unchanged. `npm audit --omit=dev` reported zero as of 1.0.0; run it again after
+  `npm install`, since advisories keep arriving for pinned ranges.
 - **`drizzle-kit` is not used.** It pulls in a vulnerable esbuild, and there are only a
   handful of migrations. SQL is written by hand in `server/db/migrate.ts`, with a
   `_migrations` table tracking what has been applied. Schema types come from the Drizzle

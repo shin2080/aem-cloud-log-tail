@@ -42,7 +42,8 @@
 - **Fastify 4 → 5.** SPEC 은 4 를 지정했지만 4.x 에는 수정판이 5 에만 있는 high 등급 권고가 셋 있다
   (`sendWebStream` 메모리, Content-Type 우회, `X-Forwarded-*` 스푸핑). Node 20+ 를 이미 요구하므로 5 로 올렸다.
   `@fastify/cookie` 11, `@fastify/static` 10 이 여기에 맞물린다. 우리가 쓰는 API 는 차이가 없다.
-  `npm audit` 은 0건이다.
+  1.0.0 시점에 `npm audit --omit=dev` 는 0건이었다. 고정된 범위에도 권고가 계속 나오니
+  `npm install` 뒤에는 다시 돌려본다.
 - **`drizzle-kit` 을 쓰지 않는다.** 취약한 esbuild 를 끌고 오는 데다, 마이그레이션이 몇 개 안 되는 규모다.
   `server/db/migrate.ts` 에 SQL 을 손으로 넣고 `_migrations` 테이블로 적용 여부를 관리한다.
   스키마 타입은 `server/db/schema.ts` 의 Drizzle 정의가 담당한다 — 두 곳이 어긋나지 않게 같이 고친다.

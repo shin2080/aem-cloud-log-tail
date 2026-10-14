@@ -4,7 +4,7 @@ import { LineBufferedParser, type ParsedLine } from './lineparser.js';
 
 /**
  * aemerror 라인 포맷:
- *   25.09.2023 15:34:56.428 [cm-p33452-e121351-aem-author-54c7ddc56c-vf8vb] *INFO* [sling-oak-observation-5] com.adobe.cq.Foo 메시지
+ *   25.09.2023 15:34:56.428 [cm-p12345-e987654-aem-author-54c7ddc56c-vf8vb] *INFO* [sling-oak-observation-5] com.adobe.cq.Foo 메시지
  *
  * 타임스탬프는 UTC 다. 내부는 전부 epoch ms 로 다루고 표시할 때만 KST 로 바꾼다.
  * 실환경 표본 177줄에 100% 일치하는 것을 확인했다 (docs/findings.md).

@@ -65,7 +65,7 @@ export interface LogEntry {
   /** epoch ms. 원본은 UTC */
   ts: number;
   level: LogLevel;
-  /** cm-p33452-e121351-aem-author-... */
+  /** cm-p12345-e987654-aem-author-... */
   pod: string;
   thread: string;
   logger: string;

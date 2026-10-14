@@ -6,7 +6,7 @@ import '../parse/register.js'; // 파서 등록
 import { TailSession, utcDate, type TailEvent } from './session.js';
 import type { RangeRead, ResolvedTail, TailTransport } from './transport.js';
 
-const POD = 'cm-p33452-e121351-aem-author-54c7ddc56c-vf8vb';
+const POD = 'cm-p12345-e987654-aem-author-54c7ddc56c-vf8vb';
 
 function line(date: string, time: string, level = 'INFO', msg = 'hello'): string {
   const [y, m, d] = date.split('-');

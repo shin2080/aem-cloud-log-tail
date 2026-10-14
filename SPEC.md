@@ -302,7 +302,7 @@ watching the same environment share one polling loop. When subscribers reach zer
 `aemerror` line format:
 
 ```
-25.09.2023 15:34:56.428 [cm-p33452-e121351-aem-author-54c7ddc56c-vf8vb] *INFO* [sling-oak-observation-5] com.adobe.cq.Foo message body
+25.09.2023 15:34:56.428 [cm-p12345-e987654-aem-author-54c7ddc56c-vf8vb] *INFO* [sling-oak-observation-5] com.adobe.cq.Foo message body
 ```
 
 ```ts
@@ -312,7 +312,7 @@ interface LogEntry {
   seq: number;          // monotonic within a session. Key for client dedupe and range selection
   ts: number;           // epoch ms (the source is UTC)
   level: 'ERROR' | 'WARN' | 'INFO' | 'DEBUG' | 'TRACE' | 'UNKNOWN';
-  pod: string;          // cm-p33452-e121351-aem-author-...
+  pod: string;          // cm-p12345-e987654-aem-author-...
   thread: string;
   logger: string;       // first token of the message
   message: string;
