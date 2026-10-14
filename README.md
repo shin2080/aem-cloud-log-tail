@@ -192,6 +192,22 @@ Logs live **in memory only**. The ring buffer holds 20,000 lines / 32MB per sess
 anything beyond that is pushed out oldest-first. The UI tells you when that happens.
 Bookmark a line to hold on to it.
 
+More you can do from the header and the lines:
+
+- **Filters live in the URL.** Level, search term and regex flag sit next to the pane
+  target, so they survive a refresh — including the automatic one after a deploy — and
+  travel with a shared link
+- Click a line's **pod or thread** to filter to it. In AEM a thread is one request, so
+  collecting one thread shows everything that request did. Pods show only their suffix
+- **Shift+click** a bar in the distribution to move every pane to that moment — for
+  looking at the same instant across tiers side by side
+- The `⋯` menu has **Clear screen**, **Apply this filter to all panes** and
+  **Expand all stack traces**
+- When the stream drops it **reconnects on its own**, backing off from 5 seconds to a
+  minute. Only revoked access stops it. 'Reconnect' in the header does it right away
+- If an ERROR arrives while the tab is hidden, the title becomes `(N) …` until you look
+- `/` focuses the first pane's filter box. Lines from another day carry a date prefix
+
 ### Time-range search
 
 Pick a range at the top and press **Search**. Presets are 5min / 10min / 30min / 1h / 6h / 24h.
