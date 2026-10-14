@@ -18,6 +18,12 @@ export abstract class LineBufferedParser implements LogParser {
   private carry = '';
   /** 아직 열려 있는 엔트리. 뒤따르는 비정형 라인이 여기 붙는다. */
   private open: LogEntry | null = null;
+  /**
+   * 시각을 아직 모르는 선두 조각. 스트림 중간에 붙으면 첫 줄이 잘려 들어오는데,
+   * 그 조각은 바로 다음 정상 줄과 같은 시각이다. 다음 줄이 오면 그 시각을 물려준다.
+   * 예전에는 Date.now() 를 박아서, 시각 이동이 늘 이 줄에 걸려 맨 위로 튀었다.
+   */
+  private pendingOrphan: LogEntry | null = null;
   private seq: number;
 
   constructor(startSeq = 0) {
@@ -68,6 +74,11 @@ export abstract class LineBufferedParser implements LogParser {
 
     const parsed = this.parseLine(line);
     if (parsed) {
+      if (this.pendingOrphan) {
+        this.pendingOrphan.ts = parsed.ts;
+        touched.set(this.pendingOrphan.seq, this.pendingOrphan);
+        this.pendingOrphan = null;
+      }
       const entry: LogEntry = { ...parsed, seq: this.seq++, continuation: [] };
       this.open = entry;
       touched.set(entry.seq, entry);
@@ -86,9 +97,10 @@ export abstract class LineBufferedParser implements LogParser {
     if (line.trim().length === 0) return;
 
     // 스트림 중간에 붙었을 때의 첫 몇 줄, 또는 형식을 모르는 줄.
+    // 직전 줄이 있으면 그 시각, 없으면 다음 정상 줄이 올 때 물려받는다.
     const orphan: LogEntry = {
       seq: this.seq++,
-      ts: Date.now(),
+      ts: this.open?.ts ?? 0,
       level: 'UNKNOWN',
       pod: '',
       thread: '',
@@ -97,6 +109,7 @@ export abstract class LineBufferedParser implements LogParser {
       continuation: [],
       raw: line,
     };
+    if (!this.open) this.pendingOrphan = orphan;
     this.open = orphan;
     touched.set(orphan.seq, orphan);
   }

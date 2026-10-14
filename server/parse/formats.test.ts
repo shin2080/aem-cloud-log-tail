@@ -283,3 +283,21 @@ describe('레지스트리', () => {
     }
   });
 });
+
+describe('잘린 선두 조각의 시각', () => {
+  test('다음 정상 줄의 시각을 물려받는다 — Date.now() 가 아니다', async () => {
+    const { createParser } = await import('./parser.js');
+    await import('./register.js');
+    const p = createParser('aemaccess', 0);
+    const before = Date.now();
+    const first = p.push('P/1.1" 200 13\n');
+    assert.equal(first.length, 1);
+    assert.ok(first[0]!.ts < before - 365 * 24 * 3600_000, '선두 조각에 현재 시각이 박히면 시각 이동이 늘 여기 걸린다');
+
+    const next = p.push('cm-p1-e2-aem-author-x 127.0.0.1 - 29/Aug/2026:00:58:48 +0000 "GET /a HTTP/1.1" 200 1\n');
+    const orphan = next.find((e) => e.seq === 0);
+    const real = next.find((e) => e.seq === 1)!;
+    assert.ok(orphan, '시각이 바뀐 조각은 다시 내보내야 화면이 고친다');
+    assert.equal(orphan!.ts, real.ts);
+  });
+});
