@@ -647,6 +647,34 @@ apart when the policy changes. There is exactly one place that decides:
 
 ---
 
+## Versions and updates
+
+The account menu shows the **running version**. Once a day the server asks GitHub
+Releases whether a newer one exists, and if so tells **admins** in the account menu with
+a link to the release notes. Regular users are not told, since they cannot upgrade the
+server anyway.
+
+- Only the server asks. Browsers never call GitHub
+- Without internet access it fails silently. If you would rather the server never reach
+  GitHub, set `UPDATE_CHECK=false`
+- After you upgrade the server, every open screen **refreshes itself** through the
+  service worker
+
+Upgrading is `git pull && npm install && npm run build`, then restart.
+
+### Cutting a release (for maintainers)
+
+Bump `version` in `package.json` and push a tag with the same number; the Actions
+workflow creates the Release. Notes come from the matching section of `CHANGELOG.md`
+(`## 1.1.0`); if there is none, GitHub generates them from the commits.
+
+```bash
+npm version 1.1.0 --no-git-tag-version   # changes package.json only
+git commit -am "Release 1.1.0" && git tag v1.1.0 && git push && git push --tags
+```
+
+---
+
 ## License
 
 [MIT](LICENSE). Use, modify and distribute it freely. No warranty.

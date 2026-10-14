@@ -102,6 +102,14 @@ const serverSchema = z.object({
   /** 알림 기록 보존. 감사 기록과 같은 이유로 무한히 쌓게 두지 않는다 */
   ALERT_HIT_RETENTION_DAYS: int(30, 0),
   /**
+   * 하루 한 번 GitHub 에 새 릴리스가 있는지 묻고 관리자 메뉴에 알린다.
+   *
+   * 서버 IP 가 GitHub 에 닿는다는 것 자체를 꺼리는 환경이 있다. 그래서 끌 수 있다.
+   * 인터넷이 없으면 조용히 실패하고, 저장소가 비공개인 동안은 404 라 아무 일도 없다.
+   */
+  UPDATE_CHECK: bool(true),
+  UPDATE_CHECK_REPO: z.string().regex(/^[\w.-]+\/[\w.-]+$/).default('shin2080/aem-cloud-log-tail'),
+  /**
    * 감사 기록 보존 기간. 0이면 영구 보관한다.
    *
    * 삭제 API 를 안 만드는 것과 무한히 쌓이게 두는 것은 다른 문제다.

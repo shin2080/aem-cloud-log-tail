@@ -1,5 +1,5 @@
-import { useEffect } from 'react';
-import { AppShell, Box, Button, Center, Group, Loader, Menu, Text } from '@mantine/core';
+import { useEffect, useState } from 'react';
+import { AppShell, Box, Button, Center, Group, Indicator, Loader, Menu, Text } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { Navigate, Route, Routes } from 'react-router-dom';
 import { SessionProvider, useSession } from './api/session';
@@ -23,6 +23,21 @@ function Shell() {
   const { me, loading, setMe } = useSession();
   const t = useT();
   const install = useInstallBanner();
+
+  /*
+   * 버전과 새 릴리스. 서버가 하루 한 번 GitHub 에 물어둔 것을 받아온다.
+   * 모니터에 걸어둔 화면도 따라오게 6시간마다 다시 본다 — 서버의 확인 주기보다 짧으면 된다.
+   */
+  const [ver, setVer] = useState<Awaited<ReturnType<typeof api.version>> | null>(null);
+  useEffect(() => {
+    if (!me) return;
+    const load = (): void => {
+      void api.version().then(setVer).catch(() => {});
+    };
+    load();
+    const id = setInterval(load, 6 * 3600_000);
+    return () => clearInterval(id);
+  }, [me?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // 1분을 멀쩡히 버텼으면 그 전의 실패는 잊는다. 안 그러면 어제 한 번 터진 것 때문에
   // 오늘의 첫 자동 새로고침이 5분 뒤로 밀린다.
@@ -95,12 +110,25 @@ function Shell() {
             <AlertBell />
             <Menu position="bottom-end">
             <Menu.Target>
-              <Button variant="subtle" size="compact-sm" color="gray">
-                {me.displayName}
-              </Button>
+              {/* 새 릴리스가 있으면 점 하나. 관리자에게만 오는 값이라 다른 사람은 늘 꺼져 있다 */}
+              <Indicator disabled={!ver?.update} size={7} color="blue" offset={4}>
+                <Button variant="subtle" size="compact-sm" color="gray">
+                  {me.displayName}
+                </Button>
+              </Indicator>
             </Menu.Target>
             <Menu.Dropdown>
               <Menu.Label>{me.email}</Menu.Label>
+              {ver && (
+                <Menu.Label>
+                  {t('nav.version', { v: ver.version })}
+                </Menu.Label>
+              )}
+              {ver?.update && (
+                <Menu.Item component="a" href={ver.update.url} target="_blank" rel="noreferrer" c="blue">
+                  {t('nav.updateAvailable', { v: ver.update.tag })}
+                </Menu.Item>
+              )}
               {me.role === 'admin' && (
                 <>
                   <Menu.Divider />

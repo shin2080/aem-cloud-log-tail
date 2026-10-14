@@ -31,6 +31,8 @@ export const ko = {
   'nav.changePassword': '비밀번호 변경',
   'nav.logout': '로그아웃',
   'nav.language': '언어',
+  'nav.version': '버전 {v}',
+  'nav.updateAvailable': '{v} 사용 가능 — 릴리스 노트',
 
   /* ── 로그인 ───────────────────────────────────────────── */
   'login.subtitle': '계정은 관리자가 발급한다.',
@@ -369,6 +371,8 @@ export const en: Record<StringKey, string> = {
   'nav.changePassword': 'Change password',
   'nav.logout': 'Sign out',
   'nav.language': 'Language',
+  'nav.version': 'Version {v}',
+  'nav.updateAvailable': '{v} available — release notes',
 
   /* ── sign in ──────────────────────────────────────────── */
   'login.subtitle': 'Accounts are issued by an administrator.',

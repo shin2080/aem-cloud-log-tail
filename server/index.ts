@@ -13,6 +13,7 @@ import { registerJsonBodyParser } from './routes/jsonbody.js';
 import { registerAuthGuard, fail } from './auth/middleware.js';
 import { purgeOldAudit, auditRowCount } from './auth/audit.js';
 import { registerAuthRoutes } from './routes/auth.js';
+import { registerVersionRoutes } from './routes/version.js';
 import { registerOrgRoutes } from './routes/orgs.js';
 import { registerEnvironmentRoutes } from './routes/environments.js';
 import { registerTailRoutes } from './routes/tail.js';
@@ -70,6 +71,7 @@ async function main(): Promise<void> {
   registerAdminRoutes(app, ctx);
   registerFilterRoutes(app, ctx);
   registerAlertRoutes(app, ctx);
+  registerVersionRoutes(app, ctx);
 
   app.get('/api/health', async () => ({ ok: true }));
 
@@ -135,6 +137,7 @@ async function main(): Promise<void> {
 
   const close = async (signal: string): Promise<void> => {
     console.log(`\n[${signal}] 종료한다`);
+    ctx.updates?.stop();
     ctx.alerts.stop();   // 감시 구독을 놓아야 tail 세션이 정리된다
     ctx.tails.stopAll(); // 폴링 루프를 멈추고 링버퍼를 비운다
     ctx.searches.stopAll();
@@ -153,8 +156,11 @@ async function main(): Promise<void> {
     console.error('[alerts] 감시를 시작하지 못했다:', err instanceof Error ? err.message : err);
   });
 
+  ctx.updates?.start();
+
   await app.listen({ port: cfg.PORT, host: cfg.HOST });
-  console.log(`\n  AEM Cloud Log Viewer → http://${cfg.HOST}:${cfg.PORT}`);
+  console.log(`\n  AEM Cloud Log Viewer v${ctx.version} → http://${cfg.HOST}:${cfg.PORT}`);
+  if (!ctx.updates) console.log('  업데이트 확인 꺼짐 (UPDATE_CHECK=false)');
   console.log(`  조직 ${cfg.orgs.size}개 로드: ${[...cfg.orgs.keys()].join(', ')}`);
   console.log(
     `  감사 기록 ${auditRowCount(handle.db).toLocaleString()}건 ` +

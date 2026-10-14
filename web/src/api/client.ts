@@ -181,6 +181,17 @@ export const api = {
       body: JSON.stringify(ids ? { ids } : {}),
     }),
 
+  /* ── 버전 ───────────────────────────────────────────── */
+
+  version: () =>
+    request<{
+      version: string;
+      checkEnabled: boolean;
+      /** 관리자에게만, 실행 중인 것보다 새 릴리스가 있을 때 */
+      update: { tag: string; version: string; url: string; publishedAt: string | null } | null;
+      checkedAt: number | null;
+    }>('/api/version'),
+
   /* ── 저장된 필터 ────────────────────────────────────── */
 
   filters: () =>

@@ -598,6 +598,30 @@ scripts/make-icons.ts        PWA 아이콘 생성 (`npm run icons`)
 
 ---
 
+## 버전과 업데이트
+
+계정 메뉴에 **실행 중인 버전**이 보입니다. 서버는 하루 한 번 GitHub Releases 에
+새 버전이 있는지 묻고, 있으면 **관리자 계정 메뉴**에 릴리스 노트 링크와 함께 알립니다.
+일반 사용자는 서버를 올릴 수 없으니 알리지 않습니다.
+
+- 묻는 쪽은 서버뿐입니다. 뷰어는 GitHub 를 부르지 않습니다
+- 인터넷이 없으면 조용히 넘어갑니다. 서버 IP 가 GitHub 에 닿는 것이 싫으면 `UPDATE_CHECK=false`
+- 서버를 올리고 나면 열려 있는 모든 화면은 서비스워커가 **알아서 새로고침**합니다
+
+올리는 법은 `git pull && npm install && npm run build` 뒤 재시작입니다.
+
+### 릴리스를 내는 법 (관리하는 분께)
+
+`package.json` 의 `version` 을 올리고 같은 번호로 태그를 밀면 Actions 가 Release 를 만듭니다.
+노트는 `CHANGELOG.md` 의 해당 절(`## 1.1.0`)에서 가져오고, 없으면 GitHub 가 커밋으로 만듭니다.
+
+```bash
+npm version 1.1.0 --no-git-tag-version   # package.json 만 바꾼다
+git commit -am "Release 1.1.0" && git tag v1.1.0 && git push && git push --tags
+```
+
+---
+
 ## 라이선스
 
 [MIT](LICENSE). 마음대로 쓰고 고치고 배포해도 됩니다. 보증은 없습니다.
