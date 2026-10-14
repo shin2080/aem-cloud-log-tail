@@ -32,6 +32,8 @@ export interface LogViewerProps {
    * 보이는 줄 수와 다르다. 액션바가 거짓말하지 않게 부모가 알려준다.
    */
   expandedCount?: number;
+  /** pod·thread 를 누르면 그 값으로 거른다. 넘기지 않으면 그냥 글자다 */
+  onFilterToken?: (text: string) => void;
 }
 
 /** 이 픽셀 안쪽이면 '바닥에 붙어 있다'고 본다. */
@@ -54,6 +56,7 @@ export function LogViewer({
   onToggleBookmark,
   seekTs,
   expandedCount,
+  onFilterToken,
 }: LogViewerProps) {
   const t = useT();
   const parentRef = useRef<HTMLDivElement>(null);
@@ -240,6 +243,7 @@ export function LogViewer({
                   entries[v.index]!.seq <= selection.toSeq
                 }
                 onPick={onSelectionChange ? pick : undefined}
+                onFilterToken={onFilterToken}
               />
             </Box>
           ))}

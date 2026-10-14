@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActionIcon, Badge, Box, Button, Checkbox, Group, Loader, Menu, Stack, Text, TextInput, Tooltip } from '@mantine/core';
 import type { EnvironmentSummary, LogEntry, LogLevel } from '@shared/types';
 import { api } from '../api/client';
@@ -89,6 +89,19 @@ export function TailPane({
   const setLevels = (next: LogLevel[]) => onFilterChange({ ...filter, levels: next });
   const setQuery = (next: string) => onFilterChange({ ...filter, query: next });
   const setUseRegex = (next: boolean) => onFilterChange({ ...filter, regex: next });
+
+  /*
+   * 줄에서 pod·thread 를 눌렀을 때. 보이는 모든 LogLine 의 prop 이라 함수가
+   * 바뀌면 memo 가 전부 깨진다 — 최신 필터와 콜백은 ref 로 보고 함수는 고정한다.
+   * 누른 값 그대로 거른다. 정규식이 켜져 있었다면 끈다 (thread 이름에 점·대괄호가 흔하다).
+   */
+  const filterRef = useRef(filter);
+  filterRef.current = filter;
+  const changeRef = useRef(onFilterChange);
+  changeRef.current = onFilterChange;
+  const filterByToken = useCallback((text: string) => {
+    changeRef.current({ ...filterRef.current, query: text, regex: false });
+  }, []);
   const [envInfo, setEnvInfo] = useState<EnvironmentSummary | null>(null);
   const [exportOpen, setExportOpen] = useState(false);
 
@@ -408,6 +421,7 @@ export function TailPane({
           fontSize={fontSize}
           onSelectionChange={view.setSelection}
           expandedCount={view.selectedCount}
+          onFilterToken={filterByToken}
           selectionActions={() => (
             <>
               <CopySelectionButton entries={view.rows.filter((e) => view.selectedSeqSet.has(e.seq))} />

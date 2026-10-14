@@ -36,6 +36,17 @@ function formatTime(ts: number, mode: TimeZoneMode): string {
   return `${p(d.getUTCHours())}:${p(d.getUTCMinutes())}:${p(d.getUTCSeconds())}.${p(d.getUTCMilliseconds(), 3)}`;
 }
 
+/**
+ * 'cm-p33452-e121351-aem-author-54c7ddc56c-vf8vb' → 'vf8vb'
+ *
+ * 같은 환경 안에서는 앞이 전부 같고 끝 조각만 다르다. 그 조각이 곧 '어느 인스턴스' 다.
+ * cdn 의 pod 자리에는 호스트가 오는데 그건 자르지 않는다 — 'com' 만 남으면 곤란하다.
+ */
+function shortenPod(pod: string): string {
+  if (/^cm-p\d+-e\d+-/.test(pod)) return pod.slice(pod.lastIndexOf('-') + 1);
+  return pod;
+}
+
 /** 'com.adobe.cq.dam.core.impl.AssetImpl' -> 'c.a.c.d.c.i.AssetImpl' */
 function shortenLogger(logger: string): string {
   const parts = logger.split('.');
@@ -56,7 +67,22 @@ export interface LogLineProps {
   groupCount?: number;
   bookmarked?: boolean;
   onToggleBookmark?: (seq: number) => void;
+  /**
+   * pod·thread 를 누르면 그 값으로 거른다.
+   *
+   * AEM 에서 thread 는 곧 요청 하나다. 같은 thread 의 줄만 모으면 '이 요청이 한 일
+   * 전부' 가 나온다 — 디버깅에서 가장 자주 하는 동작인데, 값이 메모리에 있으면서도
+   * 화면에 없어서 손으로 옮겨 적어야 했다.
+   */
+  onFilterToken?: (text: string) => void;
 }
+
+// light-dark() 로 두 테마에서 모두 대비가 나오게 한다. yellow-9 고정이면 라이트에서 안 읽힌다.
+const MARK_STYLE = {
+  background: 'light-dark(var(--mantine-color-yellow-3), var(--mantine-color-yellow-9))',
+  color: 'inherit',
+  padding: 0,
+} as const;
 
 function highlightText(text: string, re: RegExp | null) {
   if (!re || text.length === 0) return text;
@@ -69,15 +95,7 @@ function highlightText(text: string, re: RegExp | null) {
     if (m.index === undefined || m[0].length === 0) continue;
     if (m.index > last) parts.push(text.slice(last, m.index));
     parts.push(
-      // light-dark() 로 두 테마에서 모두 대비가 나오게 한다. yellow-9 고정이면 라이트에서 안 읽힌다.
-      <mark
-        key={n++}
-        style={{
-          background: 'light-dark(var(--mantine-color-yellow-3), var(--mantine-color-yellow-9))',
-          color: 'inherit',
-          padding: 0,
-        }}
-      >
+      <mark key={n++} style={MARK_STYLE}>
         {m[0]}
       </mark>,
     );
@@ -86,6 +104,22 @@ function highlightText(text: string, re: RegExp | null) {
   if (parts.length === 0) return text;
   if (last < text.length) parts.push(text.slice(last));
   return parts;
+}
+
+/**
+ * 줄여서 보여주는 글자에 칠한다.
+ *
+ * pod·thread 는 잘라서, 로거는 축약해서 보여준다. 검색어가 잘려나간 부분에만 맞으면
+ * 보이는 글자 안에서는 못 찾는다 — 거르기는 원문을 보므로 줄은 남는데 칠해진 데가
+ * 없는 어긋남이 생긴다. 보이는 조각에서 못 찾았더라도 원문에 맞으면 조각 전체를 칠한다.
+ */
+function highlightShortened(full: string, shown: string, re: RegExp | null) {
+  const partial = highlightText(shown, re);
+  // 이미 칠해졌거나(배열) 검색어가 없으면 그대로.
+  if (partial !== shown || !re) return partial;
+  // 공유 정규식의 lastIndex 를 건드리지 않게 g 없이 복사해 원문만 확인한다.
+  const probe = new RegExp(re.source, re.flags.replace('g', ''));
+  return probe.test(full) ? <mark style={MARK_STYLE}>{shown}</mark> : shown;
 }
 
 export const LogLine = memo(function LogLine({
@@ -98,6 +132,7 @@ export const LogLine = memo(function LogLine({
   groupCount,
   bookmarked,
   onToggleBookmark,
+  onFilterToken,
 }: LogLineProps) {
   const t = useT();
   const [open, setOpen] = useState(false);
@@ -146,10 +181,39 @@ export const LogLine = memo(function LogLine({
           {entry.level === 'UNKNOWN' ? '·' : entry.level}
         </Badge>
 
+        {/*
+          pod 와 thread 는 파서가 뽑아두고도 그동안 어디에도 안 그렸다.
+          둘 다 흐리게, 누르면 그 값으로 거른다. 검색어가 여기 맞으면 여기에도 칠한다 —
+          거르기는 raw 를 보는데 칠하기는 message 에만 하면, thread 로 검색했을 때
+          줄은 남는데 아무것도 안 켜지는 어긋남이 생긴다.
+        */}
+        {entry.pod && (
+          <Token
+            full={entry.pod}
+            shown={shortenPod(entry.pod)}
+            max={14}
+            px={px}
+            highlight={highlight}
+            tip={t('line.podTip')}
+            onPick={onFilterToken}
+          />
+        )}
+        {entry.thread && (
+          <Token
+            full={entry.thread}
+            shown={entry.thread}
+            max={18}
+            px={px}
+            highlight={highlight}
+            tip={t('line.threadTip')}
+            onPick={onFilterToken}
+          />
+        )}
+
         {entry.logger && (
           <Tooltip label={entry.logger} openDelay={400} withArrow>
             <Text span c="dimmed" style={{ flexShrink: 0, fontSize: px, cursor: 'default' }}>
-              {shortenLogger(entry.logger)}
+              {highlightShortened(entry.logger, shortenLogger(entry.logger), highlight)}
             </Text>
           </Tooltip>
         )}
@@ -249,3 +313,47 @@ export const LogLine = memo(function LogLine({
     </Box>
   );
 });
+
+/** pod·thread 한 조각. 누르면 그 값으로 거른다. */
+function Token({
+  full,
+  shown,
+  max,
+  px,
+  highlight,
+  tip,
+  onPick,
+}: {
+  full: string;
+  shown: string;
+  max: number;
+  px: number;
+  highlight: RegExp | null;
+  tip: string;
+  onPick?: (text: string) => void;
+}) {
+  const text = shown.length > max ? `${shown.slice(0, max - 1)}…` : shown;
+  return (
+    <Tooltip label={onPick ? `${full} — ${tip}` : full} openDelay={400} withArrow>
+      <Text
+        span
+        c="dimmed"
+        // 줄의 mousedown 은 범위 선택을 시작한다. 여기서 막아야 '거르기' 가 '선택' 이 되지 않는다.
+        onMouseDown={(e) => e.stopPropagation()}
+        onClick={(e) => {
+          e.stopPropagation();
+          onPick?.(full);
+        }}
+        style={{
+          flexShrink: 0,
+          fontSize: px,
+          cursor: onPick ? 'pointer' : 'default',
+          textDecoration: onPick ? 'underline dotted' : undefined,
+          textUnderlineOffset: 2,
+        }}
+      >
+        {highlightShortened(full, text, highlight)}
+      </Text>
+    </Tooltip>
+  );
+}

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActionIcon,
   Badge,
@@ -74,6 +74,12 @@ export function SearchPane({
   const [useRegex, setUseRegex] = useState(false);
   const [envInfo, setEnvInfo] = useState<EnvironmentSummary | null>(null);
   const [exportOpen, setExportOpen] = useState(false);
+
+  // 줄에서 pod·thread 를 누르면 그 값으로 거른다. tail 과 같은 동작이다.
+  const filterByToken = useCallback((text: string) => {
+    setQuery(text);
+    setUseRegex(false);
+  }, []);
 
   const s = useSearch();
   const view = useLogView(s.entries, `search:${paneKey(target)}`);
@@ -344,6 +350,7 @@ export function SearchPane({
           fontSize={fontSize}
           onSelectionChange={view.setSelection}
           expandedCount={view.selectedCount}
+          onFilterToken={filterByToken}
           selectionActions={() => (
             <Button size="compact-xs" onClick={() => setExportOpen(true)}>
               {t('pane.exportSelection')}
