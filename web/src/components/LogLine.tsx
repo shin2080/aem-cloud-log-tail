@@ -30,10 +30,34 @@ export const FONT_LABEL: Record<FontSize, StringKey> = {
   lg: 'font.lg',
 };
 
+function shifted(ts: number, mode: TimeZoneMode): Date {
+  return new Date(mode === 'UTC' ? ts : ts + 9 * 3600_000);
+}
+
 function formatTime(ts: number, mode: TimeZoneMode): string {
-  const d = new Date(mode === 'UTC' ? ts : ts + 9 * 3600_000);
+  const d = shifted(ts, mode);
   const p = (n: number, w = 2) => String(n).padStart(w, '0');
   return `${p(d.getUTCHours())}:${p(d.getUTCMinutes())}:${p(d.getUTCSeconds())}.${p(d.getUTCMilliseconds(), 3)}`;
+}
+
+/**
+ * 오늘이 아닌 줄에는 날짜를 앞에 붙인다.
+ *
+ * 한산한 dev 의 aemerror 는 2만 줄이 며칠치라, 롤오버 뒤에는 어제와 오늘이 똑같이
+ * 보였다. 매 줄에 날짜를 붙이면 열이 넓어지기만 하니 다른 날에만 붙인다.
+ */
+function datePrefix(ts: number, mode: TimeZoneMode): string | null {
+  const d = shifted(ts, mode);
+  const now = shifted(Date.now(), mode);
+  if (
+    d.getUTCFullYear() === now.getUTCFullYear() &&
+    d.getUTCMonth() === now.getUTCMonth() &&
+    d.getUTCDate() === now.getUTCDate()
+  ) {
+    return null;
+  }
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${p(d.getUTCMonth() + 1)}/${p(d.getUTCDate())}`;
 }
 
 /**
@@ -75,6 +99,9 @@ export interface LogLineProps {
    * 화면에 없어서 손으로 옮겨 적어야 했다.
    */
   onFilterToken?: (text: string) => void;
+  /** 스택트레이스 펼침. 부모가 들고 있으면 스크롤로 벗어났다 와도 유지된다 */
+  expanded?: boolean;
+  onToggleExpand?: (seq: number) => void;
 }
 
 // light-dark() 로 두 테마에서 모두 대비가 나오게 한다. yellow-9 고정이면 라이트에서 안 읽힌다.
@@ -133,9 +160,15 @@ export const LogLine = memo(function LogLine({
   bookmarked,
   onToggleBookmark,
   onFilterToken,
+  expanded,
+  onToggleExpand,
 }: LogLineProps) {
   const t = useT();
-  const [open, setOpen] = useState(false);
+  // 부모가 상태를 들고 있으면 그걸 쓴다. 안 주면 예전처럼 줄 안에서만 기억한다.
+  const [localOpen, setLocalOpen] = useState(false);
+  const open = expanded ?? localOpen;
+  const toggle = () => (onToggleExpand ? onToggleExpand(entry.seq) : setLocalOpen((v) => !v));
+  const date = datePrefix(entry.ts, timeZone);
   const style = LEVEL_STYLE[entry.level];
   const hasStack = entry.continuation.length > 0;
   const px = FONT_PX[fontSize];
@@ -160,6 +193,7 @@ export const LogLine = memo(function LogLine({
     >
       <Group gap={8} wrap="nowrap" align="flex-start">
         <Text span c="dimmed" style={{ flexShrink: 0, fontSize: px, fontVariantNumeric: 'tabular-nums' }}>
+          {date && <span style={{ opacity: 0.7 }}>{date} </span>}
           {formatTime(entry.ts, timeZone)}
         </Text>
 
@@ -285,7 +319,7 @@ export const LogLine = memo(function LogLine({
                 : t('line.expandAria', { n: entry.continuation.length })
             }
             aria-expanded={open}
-            onClick={(e) => { e.stopPropagation(); setOpen((v) => !v); }}
+            onClick={(e) => { e.stopPropagation(); toggle(); }}
           >
             <Text span c="dimmed" style={{ fontSize: px - 1 }}>
               {open ? '▾' : '▸'} {t('line.stack', { n: entry.continuation.length })}

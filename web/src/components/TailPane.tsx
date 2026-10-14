@@ -72,6 +72,7 @@ export function TailPane({
   sharedSeek,
   onSeekAll,
   onApplyToAll,
+  onUnseenErrors,
   timeZone,
   fontSize,
   onClose,
@@ -90,6 +91,11 @@ export function TailPane({
   onSeekAll?: (ts: number) => void;
   /** 이 창의 필터를 모든 창에 건다. 요청 ID 하나를 계층마다 세 번 치지 않게 한다 */
   onApplyToAll?: (f: PaneFilter) => void;
+  /**
+   * 탭이 가려진 사이 들어온 ERROR 수를 알린다. 페이지가 탭 제목에 모아 적는다 —
+   * 모니터 옆 창에서 일할 때 제목이 '(3) …' 으로 바뀌는 것만으로 알아챈다.
+   */
+  onUnseenErrors?: (key: string, n: number) => void;
   timeZone: TimeZoneMode;
   fontSize: FontSize;
   onClose: () => void;
@@ -166,6 +172,40 @@ export function TailPane({
   }, [tail.entries, filterInput, highlight]);
 
   const view = useLogView(visible, paneKey(target));
+
+  /*
+   * 가려진 사이 들어온 ERROR 를 센다. 보고 있을 때는 세지 않고, 다시 보면 0 으로.
+   * seq 로 '새로 온 것' 을 가리므로 재연결로 버퍼를 다시 받아도 두 번 세지 않는다.
+   */
+  const lastSeenSeq = useRef(-1);
+  const unseen = useRef(0);
+  useEffect(() => {
+    if (!onUnseenErrors) return;
+    const newest = tail.entries[tail.entries.length - 1]?.seq ?? -1;
+    if (document.visibilityState === 'hidden') {
+      let n = 0;
+      for (let i = tail.entries.length - 1; i >= 0; i--) {
+        const e = tail.entries[i]!;
+        if (e.seq <= lastSeenSeq.current) break;
+        if (e.level === 'ERROR') n++;
+      }
+      if (n > 0) {
+        unseen.current += n;
+        onUnseenErrors(paneKey(target), unseen.current);
+      }
+    }
+    lastSeenSeq.current = Math.max(lastSeenSeq.current, newest);
+  }, [tail.entries, onUnseenErrors, target]);
+  useEffect(() => {
+    if (!onUnseenErrors) return;
+    const onVisible = (): void => {
+      if (document.visibilityState !== 'visible') return;
+      unseen.current = 0;
+      onUnseenErrors(paneKey(target), 0);
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => document.removeEventListener('visibilitychange', onVisible);
+  }, [onUnseenErrors, target]);
 
   // 다른 창에서 온 시각. 이 창에 그 시각 이후 줄이 없으면 뷰어가 조용히 넘긴다.
   useEffect(() => {
@@ -263,6 +303,7 @@ export function TailPane({
         <TextInput
           size="xs"
           placeholder={t('pane.filterHere')}
+          data-pane-filter
           value={query}
           onChange={(e) => setQuery(e.currentTarget.value)}
           error={regexInvalid}
@@ -339,6 +380,17 @@ export function TailPane({
               </Group>
             </Menu.Item>
             <Menu.Divider />
+            <Menu.Item
+              disabled={view.stackCount === 0}
+              onClick={() => view.setAllExpanded(view.expanded.size === 0)}
+            >
+              <Group gap="xs" justify="space-between" wrap="nowrap">
+                <Text size="sm">{view.expanded.size > 0 ? t('pane.collapseAll') : t('pane.expandAll')}</Text>
+                <Text size="xs" c="dimmed">
+                  {t('common.count', { n: view.stackCount })}
+                </Text>
+              </Group>
+            </Menu.Item>
             {/* 비우고 → 재현하고 → 뭐가 뜨나 본다. 터미널의 clear 와 같은 기본기다. */}
             <Menu.Item onClick={tail.clear}>
               <Text size="sm">{t('pane.clear')}</Text>
@@ -466,6 +518,8 @@ export function TailPane({
           onSelectionChange={view.setSelection}
           expandedCount={view.selectedCount}
           onFilterToken={filterByToken}
+          expanded={view.expanded}
+          onToggleExpand={view.toggleExpanded}
           selectionActions={() => (
             <>
               <CopySelectionButton entries={view.rows.filter((e) => view.selectedSeqSet.has(e.seq))} />

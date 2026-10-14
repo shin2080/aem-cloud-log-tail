@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Box, Button, Group, SegmentedControl, Text, Tooltip } from '@mantine/core';
 import { useSearchParams } from 'react-router-dom';
 import { FontSizeControl, useFontSize } from '../components/FontSizeControl';
@@ -32,6 +32,41 @@ export function TailPage() {
   // 한 창에서 Shift+클릭한 시각을 모든 창에 전한다. 일련번호는 같은 시각 재클릭용이다.
   const [sharedSeek, setSharedSeek] = useState<{ ts: number; n: number } | null>(null);
   const seekAll = useCallback((ts: number) => setSharedSeek((s) => ({ ts, n: (s?.n ?? 0) + 1 })), []);
+
+  /*
+   * 탭이 가려진 사이 들어온 ERROR 수를 제목에 적는다. 창마다 세어 합친다.
+   * 알림 기능과 겹치지 않는다 — 규칙 없이 그냥 '안 보는 동안 빨간 게 왔다' 다.
+   */
+  const unseenByPane = useRef(new Map<string, number>());
+  const baseTitle = useRef(document.title);
+  const onUnseenErrors = useCallback((key: string, n: number) => {
+    unseenByPane.current.set(key, n);
+    let total = 0;
+    for (const v of unseenByPane.current.values()) total += v;
+    document.title = total > 0 ? `(${total}) ${baseTitle.current}` : baseTitle.current;
+  }, []);
+  useEffect(() => {
+    const base = baseTitle.current;
+    return () => {
+      document.title = base;
+    };
+  }, []);
+
+  // '/' 를 누르면 첫 창의 검색창으로. 입력 중일 때는 건드리지 않는다.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key !== '/' || e.metaKey || e.ctrlKey || e.altKey) return;
+      const el = e.target as HTMLElement | null;
+      if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) return;
+      const box = document.querySelector<HTMLInputElement>('input[data-pane-filter]');
+      if (!box) return;
+      e.preventDefault();
+      box.focus();
+      box.select();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
   // 고른 적 없으면 화면 폭으로 정한다. 와이드 모니터면 좌우, 좁으면 상하.
   const [direction, setDirection, isAuto] = useSplitDirection();
 
@@ -179,6 +214,7 @@ export function TailPage() {
             sharedSeek={sharedSeek}
             onSeekAll={panes.length > 1 ? seekAll : undefined}
             onApplyToAll={panes.length > 1 ? applyToAll : undefined}
+            onUnseenErrors={onUnseenErrors}
             timeZone={timeZone}
             fontSize={fontSize}
             closable={panes.length > 1}

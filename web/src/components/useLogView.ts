@@ -25,6 +25,14 @@ export interface LogViewState {
   seekTs: number | null;
   setSeekTs: (t: number | null) => void;
 
+  /** 펼쳐둔 스택트레이스의 seq */
+  expanded: Set<number>;
+  toggleExpanded: (seq: number) => void;
+  /** 화면의 스택 있는 줄을 전부 펼치거나(true) 접는다(false) */
+  setAllExpanded: (open: boolean) => void;
+  /** 화면에 스택이 있는 줄 수. 메뉴가 '펼칠 게 있나' 를 알게 한다 */
+  stackCount: number;
+
   selection: SelectionRange | null;
   setSelection: (s: SelectionRange | null) => void;
   /** 선택된 '보이는' 줄 수. 대화상자가 말하는 숫자다 */
@@ -84,6 +92,7 @@ export function useLogView(entries: LogEntry[], scope = 'default'): LogViewState
   const [onlyBookmarked, setOnlyBookmarked] = useState(false);
   const [seekTs, setSeekTs] = useState<number | null>(null);
   const [selection, setSelection] = useState<SelectionRange | null>(null);
+  const [expanded, setExpanded] = useState<Set<number>>(new Set());
 
   /**
    * 북마크한 줄은 링버퍼에서 밀려나도 여기 남는다.
@@ -170,6 +179,24 @@ export function useLogView(entries: LogEntry[], scope = 'default'): LogViewState
     return { selectedCount: seqs.length, selectedSeqs: seqs, selectedSeqSet: new Set(seqs) };
   }, [selection, rows, groups]);
 
+  const toggleExpanded = useCallback((seq: number) => {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(seq)) next.delete(seq);
+      else next.add(seq);
+      return next;
+    });
+  }, []);
+
+  const stackCount = useMemo(() => rows.reduce((n, e) => n + (e.continuation.length > 0 ? 1 : 0), 0), [rows]);
+
+  const setAllExpanded = useCallback(
+    (open: boolean) => {
+      setExpanded(open ? new Set(rows.filter((e) => e.continuation.length > 0).map((e) => e.seq)) : new Set());
+    },
+    [rows],
+  );
+
   return {
     rows,
     groupCounts,
@@ -184,6 +211,10 @@ export function useLogView(entries: LogEntry[], scope = 'default'): LogViewState
     setOnlyBookmarked,
     seekTs,
     setSeekTs,
+    expanded,
+    toggleExpanded,
+    setAllExpanded,
+    stackCount,
     selection,
     setSelection,
     selectedCount,

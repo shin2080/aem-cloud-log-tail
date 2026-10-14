@@ -34,6 +34,9 @@ export interface LogViewerProps {
   expandedCount?: number;
   /** pod·thread 를 누르면 그 값으로 거른다. 넘기지 않으면 그냥 글자다 */
   onFilterToken?: (text: string) => void;
+  /** 펼쳐둔 스택트레이스. 줄 안의 상태로 두면 스크롤로 벗어났다 오면 접혀 있다 */
+  expanded?: Set<number>;
+  onToggleExpand?: (seq: number) => void;
 }
 
 /** 이 픽셀 안쪽이면 '바닥에 붙어 있다'고 본다. */
@@ -57,6 +60,8 @@ export function LogViewer({
   seekTs,
   expandedCount,
   onFilterToken,
+  expanded,
+  onToggleExpand,
 }: LogViewerProps) {
   const t = useT();
   const parentRef = useRef<HTMLDivElement>(null);
@@ -72,9 +77,18 @@ export function LogViewer({
   const [anchor, setAnchor] = useState<number | null>(null);
   const [selection, setSelection] = useState<SelectionRange | null>(null);
 
+  // 상태와 별도로 ref 를 둔다. 스크롤 핸들러가 낡은 클로저를 보면 추적이 끊긴다.
+  const stickRef = useRef(true);
+  const setStickBoth = useCallback((v: boolean) => {
+    stickRef.current = v;
+    setStick(v);
+  }, []);
+
   const pick = useCallback(
     (seq: number, shift: boolean) => {
       if (!onSelectionChange) return;
+      // 고르기 시작하면 따라가기를 멈춘다. 안 그러면 고른 줄이 새 로그에 밀려 올라간다.
+      setStickBoth(false);
       if (shift && anchor !== null) {
         const next = { fromSeq: Math.min(anchor, seq), toSeq: Math.max(anchor, seq) };
         setSelection(next);
@@ -93,7 +107,7 @@ export function LogViewer({
       setSelection(next);
       onSelectionChange(next);
     },
-    [anchor, selection, onSelectionChange],
+    [anchor, selection, onSelectionChange, setStickBoth],
   );
 
   const clearSelection = useCallback(() => {
@@ -142,12 +156,6 @@ export function LogViewer({
 
   useEffect(pruneMeasurementCache, [pruneMeasurementCache]);
 
-  // 상태와 별도로 ref 를 둔다. 스크롤 핸들러가 낡은 클로저를 보면 추적이 끊긴다.
-  const stickRef = useRef(true);
-  const setStickBoth = useCallback((v: boolean) => {
-    stickRef.current = v;
-    setStick(v);
-  }, []);
 
   const scrollToBottom = useCallback(() => {
     const el = parentRef.current;
@@ -244,6 +252,8 @@ export function LogViewer({
                 }
                 onPick={onSelectionChange ? pick : undefined}
                 onFilterToken={onFilterToken}
+                expanded={expanded?.has(entries[v.index]!.seq)}
+                onToggleExpand={onToggleExpand}
               />
             </Box>
           ))}

@@ -351,6 +351,8 @@ export function SearchPane({
           onSelectionChange={view.setSelection}
           expandedCount={view.selectedCount}
           onFilterToken={filterByToken}
+          expanded={view.expanded}
+          onToggleExpand={view.toggleExpanded}
           selectionActions={() => (
             <Button size="compact-xs" onClick={() => setExportOpen(true)}>
               {t('pane.exportSelection')}
