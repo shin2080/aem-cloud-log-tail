@@ -326,9 +326,20 @@ export function TailPane({
             {tail.status === 'open'
               ? tail.entries.length.toLocaleString()
               : tail.status === 'error'
-                ? t('pane.disconnected')
+                ? tail.retryIn !== null
+                  ? t('pane.retryIn', { n: tail.retryIn })
+                  : t('pane.disconnected')
                 : ''}
           </Text>
+          {/*
+            끊겼고 다시 붙어볼 여지가 있으면 기다리게만 두지 않는다.
+            권한이 회수된 것(terminal)이면 눌러도 소용없으니 보여주지 않는다.
+          */}
+          {tail.status === 'error' && !tail.terminal && (
+            <Button size="compact-xs" variant="light" color="red" onClick={tail.retry}>
+              {t('pane.retryNow')}
+            </Button>
+          )}
           <LagIndicator newestTs={tail.entries[tail.entries.length - 1]?.ts ?? null} />
         </Group>
 
